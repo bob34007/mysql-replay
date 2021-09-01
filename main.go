@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/zyguan/mysql-replay/cmd"
+	"github.com/bobguo/mysql-replay/cmd"
 	"go.uber.org/zap"
 )
 

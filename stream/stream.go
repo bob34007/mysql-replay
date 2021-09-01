@@ -6,10 +6,10 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/bobguo/mysql-replay/stats"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/reassembly"
-	"github.com/zyguan/mysql-replay/stats"
 	"go.uber.org/zap"
 )
 
@@ -146,12 +146,8 @@ func (s *mysqlStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reass
 func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.AssemblerContext) {
 	length, _ := sg.Lengths()
 	if length == 0 {
-		//fmt.Println(length, len)
 		return
 	}
-
-	/*logstr := fmt.Sprintf(" reserve packet len :%v ", length)
-	s.log.Info(logstr)*/
 
 	data := sg.Fetch(length)
 	dir, _, _, skip := sg.Info()

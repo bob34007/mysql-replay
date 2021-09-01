@@ -141,7 +141,7 @@ func (rows *mysqlRows) HasNextResultSet() (b bool) {
 	/*if rows.mc == nil {
 		return false
 	}*/
-	return rows.fsm.status&statusMoreResultsExists != 0
+	return rows.fsm.pr.status&statusMoreResultsExists != 0
 }
 
 func (rows *mysqlRows) nextResultSet() (int, error) {
@@ -240,16 +240,16 @@ func (rows *textRows) readRow(dest []driver.Value) error {
 	if err != nil {
 		return err
 	}*/
-	res := rows.fsm.load(fsm.packetnum)
+	res := rows.fsm.load(fsm.pr.packetnum)
 	if !res {
 		return ErrLoadBuffer
 	}
-	fsm.packetnum++
+	fsm.pr.packetnum++
 	data := rows.fsm.data.Bytes()
 	// EOF Packet
 	if data[0] == iEOF && len(data) == 5 {
 		// server_status [2 bytes]
-		fsm.status = readStatus(data[3:])
+		fsm.pr.status = readStatus(data[3:])
 		rows.rs.done = true
 		if !rows.HasNextResultSet() {
 			//rows.mc = nil
@@ -282,7 +282,7 @@ func (rows *textRows) readRow(dest []driver.Value) error {
 			continue
 		}
 
-		if !fsm.parseTime {
+		if !fsm.pr.parseTime {
 			continue
 		}
 
@@ -305,17 +305,17 @@ func (rows *textRows) readRow(dest []driver.Value) error {
 func (rows *binaryRows) readRow(dest []driver.Value) error {
 	fsm := rows.fsm
 	var err error
-	res := fsm.load(fsm.packetnum)
+	res := fsm.load(fsm.pr.packetnum)
 	if !res {
 		return ErrLoadBuffer
 	}
-	fsm.packetnum++
+	fsm.pr.packetnum++
 	data := fsm.data.Bytes()
 	// packet indicator [1 byte]
 	if data[0] != iOK {
 		// EOF Packet
 		if data[0] == iEOF && len(data) == 5 {
-			rows.fsm.status = readStatus(data[3:])
+			rows.fsm.pr.status = readStatus(data[3:])
 			rows.rs.done = true
 			if !rows.HasNextResultSet() {
 				//rows.mc = nil
@@ -445,7 +445,7 @@ func (rows *binaryRows) readRow(dest []driver.Value) error {
 					)
 				}
 				dest[i], err = formatBinaryTime(data[pos:pos+int(num)], dstlen)
-			case rows.fsm.parseTime:
+			case rows.fsm.pr.parseTime:
 				dest[i], err = parseBinaryDateTime(num, data[pos:], time.UTC)
 			default:
 				var dstlen uint8

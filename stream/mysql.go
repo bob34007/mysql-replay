@@ -9,6 +9,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket/reassembly"
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
@@ -25,10 +26,8 @@ const (
 	StateComQuit
 	StateHandshake0
 	StateHandshake1
-	StateComQueryResReadStart
-	StateComQueryResReadEnd
-	StateComStmtExecuteResReadStart
-	StateComStmtExecuteResReadEnd
+	StateComQuery1
+	StateComStmtExecute1
 )
 
 func StateName(state int) string {
@@ -77,6 +76,44 @@ func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
 	}
 }
 
+//use for save result from replay server
+type ReplayRes struct {
+	ErrNO        uint16
+	ErrDesc      string
+	AffectedRows uint64
+	InsertId     uint64
+	SqlStatment  string
+	Values       []interface{}
+	SqlBeginTime int64
+	SqlEndTime   int64
+	//	SqlExecTime  int64
+	ColumnNum int
+	ColNames  []string
+	ColValues [][]driver.Value
+}
+
+//use for save result from packet (pcap)
+type PacketRes struct {
+	//save for query result
+	errNo        uint16
+	errDesc      string
+	affectedRows uint64
+	insertId     uint64
+	status       statusFlag
+	parseTime    bool
+	packetnum    int
+	sqlBeginTime int64
+	sqlEndTime   int64
+	columnNum    int
+	bRows        *binaryRows
+	tRows        *textRows
+	readColEnd   bool
+	//Use to ignore the EOF package following the Columns message package
+	ifReadColEndEofPacket bool
+	//Indicates whether the result set is finished reading
+	ifReadResEnd bool
+}
+
 type MySQLFSM struct {
 	log *zap.Logger
 
@@ -96,21 +133,11 @@ type MySQLFSM struct {
 	packets []MySQLPacket
 	start   int
 	count   int
-
-	//save for query result
-	affectedRows uint64
-
-	insertId              uint64
-	status                statusFlag
-	parseTime             bool
-	packetnum             int
-	sqlBeginTime          int64
-	sqlEndTime            int64
-	columnNum             int
-	bRows                 *binaryRows
-	tRows                 *textRows
-	readColEnd            bool
-	ifReadColEndEofPacket bool
+	pr      *PacketRes
+	//Rr          *ReplayRes
+	execSqlNum  uint64
+	execSuccNum uint64
+	execFailNum uint64
 }
 
 func (fsm *MySQLFSM) State() int { return fsm.state }
@@ -138,19 +165,24 @@ func (fsm *MySQLFSM) Ready() bool {
 	return n > 0 && fsm.packets[n-1].Len < maxPacketSize
 }
 
-//When a message packet with sequence number 0 is received, initialize some variables
-func (fsm *MySQLFSM) Init(pkt MySQLPacket) {
+//When a message packet with sequence number 0 is received,
+//initialize some variables
+func (fsm *MySQLFSM) InitValue() {
 	fsm.set(StateInit, "recv packet with seq(0)")
-	fsm.readColEnd = false
+	pr := new(PacketRes)
+	fsm.pr = pr
+	pr.readColEnd = false
+	pr.packetnum = 0
+	pr.columnNum = 0
+	pr.sqlBeginTime = 0
+	pr.sqlEndTime = 0
+	pr.bRows = nil
+	pr.tRows = nil
+	pr.ifReadColEndEofPacket = false
+	pr.ifReadResEnd = false
 	fsm.packets = fsm.packets[:0]
-	fsm.packetnum = 0
-	fsm.packets = append(fsm.packets, pkt)
-	fsm.columnNum = 0
-	fsm.sqlBeginTime = 0
-	fsm.sqlEndTime = 0
-	fsm.bRows = nil
-	fsm.tRows = nil
-	fsm.ifReadColEndEofPacket = false
+	//rr := new(ReplayRes)
+	//fsm.Rr = rr
 }
 
 func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
@@ -160,10 +192,11 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 	}
 	//Message sequence numbers may reuse
 	//serial number 0 for large result sets
-	if pkt.Seq == 0 { //&&
-		//fsm.State() != StateComStmtExecuteResReadStart &&
-		//fsm.State() != StateComQueryResReadStart {
-		fsm.Init(pkt)
+	if pkt.Seq == 0 &&
+		fsm.State() != StateComQuery &&
+		fsm.State() != StateComStmtExecute {
+		fsm.InitValue()
+		fsm.packets = append(fsm.packets, pkt)
 	} else if fsm.nextSeq() == pkt.Seq {
 		fsm.packets = append(fsm.packets, pkt)
 	} else {
@@ -181,46 +214,36 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 	} else if fsm.state == StateHandshake0 {
 		fsm.handleHandshakeResponse()
 	} else if fsm.state == StateComQuery {
-		fsm.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-		//fsm.set(StateComQueryResReadStart)
-		fsm.handleReadSQLResult() //ColumnNum()
-		if fsm.tRows != nil {
-			if fsm.tRows.rs.done {
-				fsm.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				fmt.Println("the query exec time is :", fsm.sqlEndTime-fsm.sqlBeginTime, "ms")
-				//fsm.set(StateComQueryResReadEnd)
+		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+		fsm.handleReadSQLResult()
+		if fsm.pr.tRows != nil {
+			if fsm.pr.tRows.rs.done {
+				fsm.pr.ifReadResEnd = true
+				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+				fsm.log.Info("the query exec time is :" +
+					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
+					"ms")
 			}
+		}
+		if fsm.pr.ifReadResEnd {
+			fsm.set(StateComQuery1)
 		}
 	} else if fsm.state == StateComStmtExecute {
-		fsm.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-		//fsm.set(StateComStmtExecuteResReadStart)
+		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 		fsm.handleReadPrepareExecResult()
-		if fsm.bRows != nil {
-			if fsm.bRows.rs.done {
-				fsm.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				fmt.Println("the query exec time is :", fsm.sqlEndTime-fsm.sqlBeginTime, "ms")
-				//fsm.set(StateComStmtExecuteResReadEnd)
+		if fsm.pr.bRows != nil {
+			if fsm.pr.bRows.rs.done {
+				fsm.pr.ifReadResEnd = true
+				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+				fsm.log.Info("the query exec time is :" +
+					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
+					"ms")
 			}
 		}
-	} /*else if fsm.state == StateComStmtExecuteResReadEnd {
-		if fsm.bRows != nil {
-			if fsm.bRows.rs.done {
-				fsm.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				fmt.Println("the query exec time is :", fsm.sqlEndTime-fsm.sqlBeginTime, "ms")
-				fsm.set(StateComStmtExecuteResReadEnd)
-			}
+		if fsm.pr.ifReadResEnd {
+			fsm.set(StateComStmtExecute1)
 		}
-	}else if fsm.state == StateComQueryResReadStart {
-		fsm.handleReadSQLResult()
-		if fsm.tRows != nil {
-			if fsm.tRows.rs.done {
-				fsm.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				fmt.Println("the query exec time is :", fsm.sqlEndTime-fsm.sqlBeginTime, "ms")
-				fsm.set(StateComQueryResReadEnd)
-			}
-		}
-	}*/
-
+	}
 }
 
 func (fsm *MySQLFSM) Packets() []MySQLPacket {
@@ -424,6 +447,38 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 	fsm.stmt = stmt
 	fsm.params = params
 	fsm.set(StateComStmtExecute)
+}
+
+//Check whether the statement is a SELECT statement
+//or a SELECT prepare statement
+func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
+	/*s := strings.ToLower(query)
+	s1 := strings.TrimSpace(s)
+	return strings.HasPrefix(s1, "select")*/
+	if len(query) < 6 {
+		return false
+	}
+	for i, x := range query {
+		if x == ' ' {
+			continue
+		} else {
+			if len(query)-i < 6 {
+				return false
+			} else {
+				if (query[i] == 'S' || query[i] == 's') &&
+					(query[i+1] == 'E' || query[i+1] == 'e') &&
+					(query[i+2] == 'L' || query[i+2] == 'l') &&
+					(query[i+3] == 'E' || query[i+3] == 'e') &&
+					(query[i+4] == 'C' || query[i+4] == 'c') &&
+					(query[i+5] == 'T' || query[i+5] == 't') {
+					return true
+				}
+				return false
+			}
+		}
+
+	}
+	return false
 }
 
 func (fsm *MySQLFSM) handleComStmtCloseNoLoad() {
@@ -892,68 +947,76 @@ func readLenEncUint(data []byte) (uint64, []byte, bool) {
 
 //read sql result from packets
 func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
-
-	//read cloumn num from packet
 	var err error
 	var rows *textRows
-	if fsm.columnNum == 0 {
-		//fsm.log.Info(fmt.Sprintf("%d", fsm.packetnum))
-		//		fmt.Println(fmt.Sprintf("%d", fsm.packetnum), fsm.packetnum)
-		fsm.columnNum, err = fsm.readResultSetHeaderPacket()
+
+	if fsm.pr.columnNum == 0 {
+		//read cloumn num from packet
+		fsm.pr.columnNum, err = fsm.readResultSetHeaderPacket()
 		if err != nil {
 			fsm.log.Info("read column from packet fail " + err.Error() +
-				fmt.Sprintf("%d", fsm.packetnum) +
+				fmt.Sprintf("%d", fsm.pr.packetnum) +
 				fmt.Sprintf("%d", len(fsm.packets)))
+			fsm.pr.ifReadResEnd = true
+			if mysqlError, ok := err.(*mysql.MySQLError); ok {
+				fsm.pr.errNo = mysqlError.Number
+				fsm.pr.errDesc = mysqlError.Message
+			}
 			return err
 		}
-		fsm.log.Info("read " + fmt.Sprintf("%d", fsm.columnNum) + " columns from packets")
+		if fsm.pr.columnNum == 0 {
+			fsm.pr.ifReadResEnd = true
+		}
+		fsm.log.Info("read " + fmt.Sprintf("%d", fsm.pr.columnNum) + " columns from packets")
+		fsm.log.Info(fmt.Sprintf("%v", fsm.pr.ifReadResEnd))
 		return nil
 	}
 
-	if fsm.columnNum > 0 {
-		if fsm.tRows == nil {
-			rows = new(textRows)
-			fsm.tRows = rows
+	if fsm.pr.columnNum > 0 {
+		//read column from packet
+		if fsm.pr.tRows == nil {
+			rows := new(textRows)
+			fsm.pr.tRows = rows
 			rows.rs.columnValue = make([][]driver.Value, 0)
 			rows.rs.columns = make([]mysqlField, 0)
 			rows.fsm = fsm
 		}
-		rows = fsm.tRows
-		if !fsm.readColEnd {
+		rows = fsm.pr.tRows
+		if !fsm.pr.readColEnd {
 			columns, err := fsm.readColumns(1)
 			if err != nil {
 				fsm.log.Info("read columns from packet fail " +
-					err.Error() + fmt.Sprintf("%d", fsm.packetnum) +
+					err.Error() + fmt.Sprintf("%d", fsm.pr.packetnum) +
 					fmt.Sprintf("%d", len(fsm.packets)))
 				return err
 			}
 			rows.rs.columns = append(rows.rs.columns, columns...)
 			fsm.log.Info(fmt.Sprintf("%d", len(rows.rs.columns)))
-			if len(rows.rs.columns) == fsm.columnNum {
-				fsm.readColEnd = true
+			if len(rows.rs.columns) == fsm.pr.columnNum {
+				fsm.pr.readColEnd = true
 			}
 			return nil
 		}
-		//confirm if it is a  EOF pcaket
-		res := fsm.load(fsm.packetnum)
+		//confirm if it is a  EOF pcaket after column message
+		res := fsm.load(fsm.pr.packetnum)
 		if res {
 			data := fsm.data.Bytes()
-			if data[0] == iEOF && !fsm.ifReadColEndEofPacket {
-				fsm.packetnum++
-				fsm.ifReadColEndEofPacket = true
+			if data[0] == iEOF && !fsm.pr.ifReadColEndEofPacket {
+				fsm.pr.packetnum++
+				fsm.pr.ifReadColEndEofPacket = true
 				fsm.log.Info("read packet reach EOF , process will ignore EOF ,wait next packet ")
 				return nil
 			}
 		}
-		if fsm.columnNum == len(rows.rs.columns) {
-			//now begin to read column values
+
+		if fsm.pr.columnNum == len(rows.rs.columns) {
+			//now begin to read rows
 			if !rows.rs.done {
-				values := make([]driver.Value, fsm.columnNum)
+				values := make([]driver.Value, fsm.pr.columnNum)
 				err = rows.Next(values)
 				if err == nil {
 					rows.rs.columnValue = append(rows.rs.columnValue, values)
 				}
-				fmt.Println(values)
 				if err == io.EOF {
 					fsm.log.Info("read repose end ")
 					return nil
@@ -962,7 +1025,6 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 					return err
 				}
 			}
-			//fmt.Println("read row done or not ", rows.rs.done)
 		}
 	}
 	return nil
@@ -972,71 +1034,76 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 	var err error
 	var rows *binaryRows
-	if fsm.columnNum == 0 {
-		fsm.columnNum, err = fsm.readResultSetHeaderPacket()
+	if fsm.pr.columnNum == 0 {
+		fsm.pr.columnNum, err = fsm.readResultSetHeaderPacket()
 		if err != nil {
 			fsm.log.Info("read column from packet fail , " +
 				err.Error() +
-				fmt.Sprintf("%d", fsm.packetnum) +
+				fmt.Sprintf("%d", fsm.pr.packetnum) +
 				fmt.Sprintf("%d", len(fsm.packets)))
+			fsm.pr.ifReadResEnd = true
+			if mysqlError, ok := err.(*mysql.MySQLError); ok {
+				fsm.pr.errNo = mysqlError.Number
+				fsm.pr.errDesc = mysqlError.Message
+			}
 			return err
 		}
-		fsm.log.Info("read " + fmt.Sprintf("%d", fsm.columnNum) + " columns from packets")
+		if fsm.pr.columnNum == 0 {
+			fsm.pr.ifReadResEnd = true
+		}
+		fsm.log.Info("read " + fmt.Sprintf("%d", fsm.pr.columnNum) + " columns from packets")
 		return nil
 	}
 
-	if fsm.columnNum > 0 {
-		if fsm.bRows == nil {
+	if fsm.pr.columnNum > 0 {
+		if fsm.pr.bRows == nil {
 			rows = new(binaryRows)
-			fsm.bRows = rows
+			fsm.pr.bRows = rows
 			rows.rs.columns = make([]mysqlField, 0)
 			rows.rs.columnValue = make([][]driver.Value, 0)
 			rows.fsm = fsm
 		}
-		rows = fsm.bRows
+		rows = fsm.pr.bRows
 		fsm.log.Info("the column number is " +
-			fmt.Sprintf("%d", fsm.columnNum) +
+			fmt.Sprintf("%d", fsm.pr.columnNum) +
 			", and read " +
 			fmt.Sprintf("%d", len(rows.rs.columns)) +
 			" columns ")
-		if !fsm.readColEnd {
+		if !fsm.pr.readColEnd {
 			columns, err := fsm.readColumns(1)
 			if err != nil {
 				fsm.log.Info("read columns from packet fail " + err.Error() +
-					fmt.Sprintf("%d", fsm.packetnum) +
+					fmt.Sprintf("%d", fsm.pr.packetnum) +
 					fmt.Sprintf("%d", len(fsm.packets)))
-				fsm.readColEnd = true
+				fsm.pr.readColEnd = true
 				return err
 			}
 			rows.rs.columns = append(rows.rs.columns, columns...)
-			fmt.Println(rows.rs.columns)
-			if len(rows.rs.columns) == fsm.columnNum {
-				fsm.readColEnd = true
+			if len(rows.rs.columns) == fsm.pr.columnNum {
+				fsm.pr.readColEnd = true
 			}
 			return nil
 		}
-		//fmt.Println(fsm.columnNum, rows)
 
 		//confirm if it is a  EOF pcaket
-		res := fsm.load(fsm.packetnum)
+		res := fsm.load(fsm.pr.packetnum)
 		if res {
 			data := fsm.data.Bytes()
-			if data[0] == iEOF && !fsm.ifReadColEndEofPacket {
-				fsm.packetnum++
-				fsm.ifReadColEndEofPacket = true
+			if data[0] == iEOF && !fsm.pr.ifReadColEndEofPacket {
+				fsm.pr.packetnum++
+				fsm.pr.ifReadColEndEofPacket = true
 				fsm.log.Info("read packet reach EOF , process will ignore EOF ,wait next packet ")
 				return nil
 			}
 		}
-		if fsm.columnNum == len(rows.rs.columns) {
+		if fsm.pr.columnNum == len(rows.rs.columns) {
 			//now begin to read column values
 			if !rows.rs.done {
-				values := make([]driver.Value, fsm.columnNum)
+				values := make([]driver.Value, fsm.pr.columnNum)
 				err = rows.Next(values)
 				if err == nil {
 					rows.rs.columnValue = append(rows.rs.columnValue, values)
 				}
-				fmt.Println(values)
 				if err == io.EOF {
 					fsm.log.Info("read respose end ")
 					return nil
@@ -1047,7 +1114,6 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 					return err
 				}
 			}
-			//fmt.Println("read row done or not ", rows.rs.done)
 		}
 	}
 	return nil
@@ -1057,12 +1123,12 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 // http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-ProtocolText::Resultset
 func (fsm *MySQLFSM) readResultSetHeaderPacket() (int, error) {
 	//data, err := mc.readPacket()
-	fsm.packetnum = 1
-	res := fsm.load(fsm.packetnum)
+	fsm.pr.packetnum = 1
+	res := fsm.load(fsm.pr.packetnum)
 	if !res {
 		return 0, ErrLoadBuffer
 	}
-	fsm.packetnum++
+	fsm.pr.packetnum++
 
 	data := fsm.data.Bytes()
 
@@ -1100,16 +1166,14 @@ func (fsm *MySQLFSM) handleOkPacket(data []byte) error {
 	// 0x00 [1 byte]
 
 	// Affected rows [Length Coded Binary]
-	fsm.affectedRows, _, n = readLengthEncodedInteger(data[1:])
+	fsm.pr.affectedRows, _, n = readLengthEncodedInteger(data[1:])
 
-	//fmt.Println(affectedRows)
 	// Insert id [Length Coded Binary]
-	fsm.insertId, _, m = readLengthEncodedInteger(data[1+n:])
+	fsm.pr.insertId, _, m = readLengthEncodedInteger(data[1+n:])
 
-	//fmt.Println(insertId)
 	// server_status [2 bytes]
-	fsm.status = readStatus(data[1+n+m : 1+n+m+2])
-	if fsm.status&statusMoreResultsExists != 0 {
+	fsm.pr.status = readStatus(data[1+n+m : 1+n+m+2])
+	if fsm.pr.status&statusMoreResultsExists != 0 {
 		return nil
 	}
 	// warning count [2 bytes]
@@ -1148,13 +1212,13 @@ func (fsm *MySQLFSM) handleErrorPacket(data []byte) error {
 func (fsm *MySQLFSM) readColumns(count int) ([]mysqlField, error) {
 	//for i := 0; ; i++ {
 	i := 0
-	res := fsm.load(fsm.packetnum)
+	res := fsm.load(fsm.pr.packetnum)
 	if !res {
 		return nil, ErrLoadBuffer //errors.New("read packet from pcap error ")
 	}
-	fsm.packetnum++
+	fsm.pr.packetnum++
 	data := fsm.data.Bytes()
-	//fmt.Println(string(data))
+
 	// EOF Packet
 	if data[0] == iEOF && (len(data) == 5 || len(data) == 1) {
 		/*if i == count {
@@ -1205,7 +1269,6 @@ func (fsm *MySQLFSM) readColumns(count int) ([]mysqlField, error) {
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Println(i, columns, len(columns))
 	columns[i].name = string(name)
 	pos += n
 
@@ -1251,20 +1314,137 @@ func (fsm *MySQLFSM) readColumns(count int) ([]mysqlField, error) {
 func (fsm *MySQLFSM) readUntilEOF() error {
 
 	for {
-		res := fsm.load(fsm.packetnum)
+		res := fsm.load(fsm.pr.packetnum)
 		if !res {
 			return ErrLoadBuffer
 		}
-		fsm.packetnum++
+		fsm.pr.packetnum++
 		data := fsm.data.Bytes()
 		switch data[0] {
 		case iERR:
 			return fsm.handleErrorPacket(data)
 		case iEOF:
 			if len(data) == 5 {
-				fsm.status = readStatus(data[3:])
+				fsm.pr.status = readStatus(data[3:])
 			}
 			return nil
 		}
 	}
+}
+
+type SqlCompareRes struct {
+	Sql     string        `json:"sql"`
+	Values  []interface{} `json:"values"`
+	ErrCode int           `json:"errcode"`
+	ErrDesc string        `json:"errdesc"`
+}
+
+func CompareValue(a driver.Value, b driver.Value) (bool, error) {
+	var as string
+	err := convertAssignRows(&as, a)
+	if err != nil {
+		return false, err
+	}
+	var bs string
+	err = convertAssignRows(&bs, b)
+	if err != nil {
+		return false, err
+	}
+	if as != bs {
+		return false, nil
+	}
+	return true, nil
+}
+
+//compare result from packet and result from tidb server
+// errcode 1: errcode not equal
+// errcode 2: exec time difference is doubled
+// errcode 3: result rownum is not equal
+// errcode 4: row detail is not equal
+func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
+	res := new(SqlCompareRes)
+	//println(fsm)
+	pr := fsm.pr
+	res.Sql = rr.SqlStatment
+	res.Values = rr.Values
+	fsm.execSqlNum++
+	//compare errcode
+	if rr.ErrNO != pr.errNo {
+		res.ErrCode = 1
+		res.ErrDesc = fmt.Sprintf("%v-%v", pr.errNo, rr.ErrNO)
+		fsm.execFailNum++
+		return res
+	}
+
+	//compare exec time
+	prSqlExecTime := pr.sqlEndTime - pr.sqlBeginTime
+	rrSqlExecTime := rr.SqlEndTime - rr.SqlBeginTime
+	if (rrSqlExecTime > prSqlExecTime+prSqlExecTime ||
+		prSqlExecTime > rrSqlExecTime+rrSqlExecTime) &&
+		math.Abs((float64)(prSqlExecTime-rrSqlExecTime)) > 150 {
+		res.ErrCode = 2
+		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
+		fsm.execFailNum++
+		return res
+	}
+
+	//compare  result row num
+	var prlen int = 0
+	var rrlen int = 0
+	if pr.tRows == nil {
+		prlen = len(pr.bRows.rs.columnValue)
+	} else {
+		prlen = len(pr.tRows.rs.columnValue)
+	}
+	rrlen = len(rr.ColValues)
+	if prlen != rrlen {
+		res.ErrCode = 3
+		res.ErrDesc = fmt.Sprintf("%v-%v", prlen, rrlen)
+		fsm.execFailNum++
+		return res
+	}
+
+	//compare result row detail
+	var prrows [][]driver.Value
+	var rrrows [][]driver.Value
+	if pr.tRows == nil {
+		prrows = pr.bRows.rs.columnValue
+	} else {
+		prrows = pr.tRows.rs.columnValue
+	}
+	rrrows = rr.ColValues
+	i := len(prrows)
+	for j := 0; j < i; j++ {
+		if len(rrrows[j]) != len(prrows[j]) {
+			res.ErrCode = 4
+			fsm.execFailNum++
+			return res
+		}
+		for k := 0; k < len(rrrows[j]); k++ {
+			r, e := CompareValue(rrrows[j][k], prrows[j][k])
+			if e != nil || !r {
+				res.ErrCode = 4
+				if e != nil {
+					res.ErrDesc = "data is considered inconsistent because the" +
+						" value failed to be resolved ," + e.Error()
+				}
+				fsm.execFailNum++
+				return res
+			}
+		}
+	}
+
+	res.ErrCode = 0
+	fsm.execSuccNum++
+
+	fmt.Println("-------compare result -------------")
+	fmt.Println("exec sql : ", fsm.execSqlNum)
+	fmt.Println("exec sql succ :", fsm.execSuccNum)
+	fmt.Println("exec sql fail :", fsm.execFailNum)
+	fmt.Println("exec errno: ", rr.ErrNO, pr.errNo)
+	fmt.Println("exec time: ", rrSqlExecTime, prSqlExecTime)
+	fmt.Println("exec res rownum: ", rrlen, prlen)
+	fmt.Println("exec res row detail : ", rrrows, prrows)
+	fmt.Println("-------compare result -------------")
+	return res
 }

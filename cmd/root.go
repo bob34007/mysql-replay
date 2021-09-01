@@ -30,9 +30,6 @@ func NewRootCmd() *cobra.Command {
 	opts.logLevel = LogLevel{zapcore.InfoLevel}
 	cmd.PersistentFlags().Var(&opts.logLevel, "log-level", "log level")
 	cmd.PersistentFlags().StringSliceVar(&opts.logOutput, "log-output", []string{"stderr"}, "log output")
-	cmd.AddCommand(NewNotifyCmd())
-	cmd.AddCommand(NewReplayCmd())
-	cmd.AddCommand(NewServeCmd())
 	cmd.AddCommand(NewTextCommand())
 	return cmd
 }
