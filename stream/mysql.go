@@ -7,12 +7,20 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket/reassembly"
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
+)
+
+var (
+	Sm          sync.Mutex
+	ExecSqlNum  uint64
+	ExecSuccNum uint64
+	ExecFailNum uint64
 )
 
 const (
@@ -1356,18 +1364,34 @@ func CompareValue(a driver.Value, b driver.Value) (bool, error) {
 	return true, nil
 }
 
+func (fsm *MySQLFSM) AddStatis() {
+	Sm.Lock()
+	defer Sm.Unlock()
+	ExecSqlNum += fsm.execSqlNum
+	ExecSuccNum += fsm.execSuccNum
+	ExecFailNum += fsm.execFailNum
+	fsm.execSqlNum = 0
+	fsm.execSuccNum = 0
+	fsm.execFailNum = 0
+}
+
 //compare result from packet and result from tidb server
 // errcode 1: errcode not equal
 // errcode 2: exec time difference is doubled
 // errcode 3: result rownum is not equal
 // errcode 4: row detail is not equal
 func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
+
 	res := new(SqlCompareRes)
-	//println(fsm)
 	pr := fsm.pr
 	res.Sql = rr.SqlStatment
 	res.Values = rr.Values
 	fsm.execSqlNum++
+
+	if fsm.execSqlNum/10 == 0 {
+		defer fsm.AddStatis()
+	}
+
 	//compare errcode
 	if rr.ErrNO != pr.errNo {
 		res.ErrCode = 1
@@ -1438,9 +1462,6 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	fsm.execSuccNum++
 
 	fmt.Println("-------compare result -------------")
-	fmt.Println("exec sql : ", fsm.execSqlNum)
-	fmt.Println("exec sql succ :", fsm.execSuccNum)
-	fmt.Println("exec sql fail :", fsm.execFailNum)
 	fmt.Println("exec errno: ", rr.ErrNO, pr.errNo)
 	fmt.Println("exec time: ", rrSqlExecTime, prSqlExecTime)
 	fmt.Println("exec res rownum: ", rrlen, prlen)

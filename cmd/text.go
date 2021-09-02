@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -25,13 +24,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-)
-
-var (
-	Sm          *sync.Mutex
-	ExecSqlNum  uint64
-	ExecSuccNum uint64
-	ExecFailNum uint64
 )
 
 func NewTextDumpCommand() *cobra.Command {
@@ -170,7 +162,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				assembler.FlushCloseOlderThan(factory.LastStreamTime().Add(-3 * time.Minute))
 			}
 			assembler.FlushAll()
-
+			StaticPrint()
 			return nil
 		},
 	}
@@ -223,7 +215,21 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 	}
 }
 
+func StaticPrint() {
+	stream.Sm.Lock()
+	defer stream.Sm.Unlock()
+	fmt.Println("-------compare result -------------")
+	fmt.Println("exec sql : ", stream.ExecSqlNum)
+	fmt.Println("exec sql succ :", stream.ExecSuccNum)
+	fmt.Println("exec sql fail :", stream.ExecFailNum)
+	fmt.Println("-------compare result -------------")
+}
+
 func (h *replayEventHandler) OnClose() {
+	//h.StaticPrint()
+	if h.fsm != nil {
+		h.fsm.AddStatis()
+	}
 	h.quit(false)
 }
 
