@@ -215,6 +215,7 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 	}
 }
 
+//print static message
 func StaticPrint() {
 	stream.Sm.Lock()
 	defer stream.Sm.Unlock()
@@ -233,6 +234,7 @@ func (h *replayEventHandler) OnClose() {
 	h.quit(false)
 }
 
+//apply mysql event to replay server
 func (h *replayEventHandler) ApplyEvent(ctx context.Context, e stream.MySQLEvent) error {
 	var err error
 	h.needCompareRes = false
@@ -283,6 +285,7 @@ LOOP:
 	return err
 }
 
+//open connect to server
 func (h *replayEventHandler) open(schema string) (*sql.DB, error) {
 	cfg := h.MySQLConfig
 	if len(schema) > 0 && cfg.DBName != schema {
@@ -292,6 +295,7 @@ func (h *replayEventHandler) open(schema string) (*sql.DB, error) {
 	return sql.Open("mysql", cfg.FormatDSN())
 }
 
+//Handle Handshake messages, similar to Use Database
 func (h *replayEventHandler) handshake(ctx context.Context, schema string) error {
 	pool, err := h.open(schema)
 	if err != nil {
@@ -349,11 +353,6 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	if err != nil {
 		return err
 	}
-	/*if h.QueryTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, h.QueryTimeout)
-		defer cancel()
-	}*/
 	stats.Add(stats.Queries, 1)
 	stats.Add(stats.ConnRunning, 1)
 	h.Rr.SqlBeginTime = time.Now().UnixNano() / 1000000
@@ -408,11 +407,7 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 	if err != nil {
 		return err
 	}
-	/*if h.QueryTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, h.QueryTimeout)
-		defer cancel()
-	}*/
+
 	h.Rr.SqlStatment = h.getQuery(stmt)
 	h.Rr.Values = params
 	stats.Add(stats.StmtExecutes, 1)
