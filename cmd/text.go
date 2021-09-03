@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 )
 
+//dump sql event to files from pcap files
 func NewTextDumpCommand() *cobra.Command {
 	var (
 		options = stream.FactoryOptions{Synchronized: true}
@@ -99,6 +100,8 @@ func NewTextDumpCommand() *cobra.Command {
 	return cmd
 }
 
+//Replay sql from pcap files，and compare reslut from pcap file and
+//replay server
 func NewTextDumpReplayCommand() *cobra.Command {
 	var (
 		options = stream.FactoryOptions{Synchronized: true}
@@ -172,11 +175,13 @@ func NewTextDumpReplayCommand() *cobra.Command {
 	return cmd
 }
 
+//Store prepare statement and handle
 type statement struct {
 	query  string
 	handle *sql.Stmt
 }
 
+//Used for replay  SQL
 type replayEventHandler struct {
 	pconn          stream.ConnID
 	dsn            string
@@ -306,7 +311,7 @@ LOOP:
 	return err
 }
 
-//open connect to server
+//connect to server
 func (h *replayEventHandler) open(schema string) (*sql.DB, error) {
 	cfg := h.MySQLConfig
 	if len(schema) > 0 && cfg.DBName != schema {
@@ -347,6 +352,7 @@ func (h *replayEventHandler) getConn(ctx context.Context) (*sql.Conn, error) {
 	return h.conn, nil
 }
 
+//Disconnect from replay server
 func (h *replayEventHandler) quit(reconnect bool) {
 	for id, stmt := range h.stmts {
 		if stmt.handle != nil {
@@ -370,6 +376,7 @@ func (h *replayEventHandler) quit(reconnect bool) {
 	}
 }
 
+//Execute SQL on replay Server
 func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	conn, err := h.getConn(ctx)
 	if err != nil {
@@ -394,6 +401,7 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	return nil
 }
 
+//Exec prepare statment on replay sql
 func (h *replayEventHandler) stmtPrepare(ctx context.Context, id uint64, query string) error {
 	stmt := h.stmts[id]
 	stmt.query = query
@@ -416,6 +424,8 @@ func (h *replayEventHandler) stmtPrepare(ctx context.Context, id uint64, query s
 	return nil
 }
 
+//Retrieve the prepare statement from SQL.Stmt
+//via the unsafe and reflection mechanisms
 func (h *replayEventHandler) getQuery(s *sql.Stmt) string {
 	rs := reflect.ValueOf(s)
 	foo := rs.Elem().FieldByName("query")
@@ -424,6 +434,8 @@ func (h *replayEventHandler) getQuery(s *sql.Stmt) string {
 	z := rf.Interface().(string)
 	return z
 }
+
+//Exec prepare on replay server
 func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params []interface{}) error {
 	stmt, err := h.getStmt(ctx, id)
 	if err != nil {
@@ -452,6 +464,7 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 	return nil
 }
 
+//Close prepare handle
 func (h *replayEventHandler) stmtClose(ctx context.Context, id uint64) {
 	stmt, ok := h.stmts[id]
 	if !ok {
@@ -464,6 +477,7 @@ func (h *replayEventHandler) stmtClose(ctx context.Context, id uint64) {
 	delete(h.stmts, id)
 }
 
+//Get prepare handle ID
 func (h *replayEventHandler) getStmt(ctx context.Context, id uint64) (*sql.Stmt, error) {
 	stmt, ok := h.stmts[id]
 	if ok && stmt.handle != nil {
@@ -483,7 +497,7 @@ func (h *replayEventHandler) getStmt(ctx context.Context, id uint64) (*sql.Stmt,
 	return stmt.handle, nil
 }
 
-//get column from sql.Rows structure
+//Get column from sql.Rows structure
 func (h *replayEventHandler) GetColNames(f *sql.Rows) {
 	var err error
 	h.Rr.ColNames, err = f.Columns()
@@ -492,7 +506,7 @@ func (h *replayEventHandler) GetColNames(f *sql.Rows) {
 	}
 }
 
-//get the lastcols value from the sql.Rows
+//Get the lastcols value from the sql.Rows
 //structure using unsafe and reflection mechanisms
 //and load it into the cache
 func (h *replayEventHandler) ReadRowValues(f *sql.Rows) {

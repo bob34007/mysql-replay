@@ -239,12 +239,12 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 
 	if fsm.state == StateInit {
 		fsm.handleInitPacket()
+		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 	} else if fsm.state == StateComStmtPrepare0 {
 		fsm.handleComStmtPrepareResponse()
 	} else if fsm.state == StateHandshake0 {
 		fsm.handleHandshakeResponse()
 	} else if fsm.state == StateComQuery {
-		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 		err := fsm.handleReadSQLResult()
 		if err != nil {
 			fsm.log.Warn("read packet fail ," + err.Error())
@@ -253,6 +253,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			if fsm.pr.tRows.rs.done {
 				fsm.pr.ifReadResEnd = true
 				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+				//fmt.Println(fsm.pr.sqlEndTime)
 				fsm.log.Info("the query exec time is :" +
 					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 					"ms")
@@ -262,7 +263,6 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			fsm.set(StateComQuery1)
 		}
 	} else if fsm.state == StateComStmtExecute {
-		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 		err := fsm.handleReadPrepareExecResult()
 		if err != nil {
 			fsm.log.Warn("read packet fail ," + err.Error())
@@ -271,6 +271,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			if fsm.pr.bRows.rs.done {
 				fsm.pr.ifReadResEnd = true
 				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+				fmt.Println(fsm.pr.sqlEndTime)
 				fsm.log.Info("the query exec time is :" +
 					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 					"ms")
@@ -517,6 +518,7 @@ func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
 	return false
 }
 
+//handle prepare close
 func (fsm *MySQLFSM) handleComStmtCloseNoLoad() {
 	stmtID, _, ok := readUint32(fsm.data.Bytes()[1:])
 	if !ok {
@@ -533,6 +535,7 @@ func (fsm *MySQLFSM) handleComStmtPrepareRequestNoLoad() {
 	fsm.set(StateComStmtPrepare0)
 }
 
+//handle prepare response
 func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 	if !fsm.load(1) {
 		fsm.set(StateUnknown, "stmt prepare: cannot load packet")
@@ -570,6 +573,7 @@ func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 	fsm.set(StateComStmtPrepare1)
 }
 
+//handle handshake response
 func (fsm *MySQLFSM) handleHandshakeResponse() {
 	if !fsm.load(1) {
 		fsm.set(StateUnknown, "handshake: cannot load packet")
@@ -665,6 +669,7 @@ func (fsm *MySQLFSM) handleHandshakeResponse() {
 	fsm.set(StateHandshake1)
 }
 
+//parse  prepare params
 func parseExecParams(stmt Stmt, nullBitmap []byte, paramTypes []byte, paramValues []byte) (params []interface{}, err error) {
 	defer func() {
 		if x := recover(); x != nil {
@@ -819,6 +824,7 @@ func parseExecParams(stmt Stmt, nullBitmap []byte, paramTypes []byte, paramValue
 	return params, nil
 }
 
+//parse data
 func parseBinaryDate(pos int, paramValues []byte) (int, string) {
 	year := binary.LittleEndian.Uint16(paramValues[pos : pos+2])
 	pos += 2
@@ -870,6 +876,8 @@ func parseBinaryTimeWithMS(pos int, paramValues []byte, isNegative uint8) (int, 
 	return pos, fmt.Sprintf("%s.%06d", dur, microSecond)
 }
 
+//read packet len
+//https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
 func parseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	switch b[0] {
 	// 251: NULL
@@ -908,6 +916,7 @@ func parseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	return
 }
 
+//parse packet length
 func parseLengthEncodedBytes(b []byte) ([]byte, bool, int, error) {
 	// Get length
 	num, isNull, n := parseLengthEncodedInt(b)
@@ -925,6 +934,7 @@ func parseLengthEncodedBytes(b []byte) ([]byte, bool, int, error) {
 	return nil, false, n, io.EOF
 }
 
+//read uint16 from byte
 func readUint16(data []byte) (uint16, []byte, bool) {
 	if len(data) < 2 {
 		return 0, data, false
@@ -932,6 +942,7 @@ func readUint16(data []byte) (uint16, []byte, bool) {
 	return binary.LittleEndian.Uint16(data), data[2:], true
 }
 
+//read uint32 from byte
 func readUint32(data []byte) (uint32, []byte, bool) {
 	if len(data) < 4 {
 		return 0, data, false
@@ -939,6 +950,7 @@ func readUint32(data []byte) (uint32, []byte, bool) {
 	return binary.LittleEndian.Uint32(data), data[4:], true
 }
 
+//read n bytes
 func readBytesN(data []byte, n int) ([]byte, []byte, bool) {
 	if len(data) < n {
 		return nil, data, false
@@ -946,6 +958,7 @@ func readBytesN(data []byte, n int) ([]byte, []byte, bool) {
 	return data[:n], data[n:], true
 }
 
+//read byte until 0
 func readBytesNUL(data []byte) ([]byte, []byte, bool) {
 	for i, b := range data {
 		if b == 0 {
@@ -955,6 +968,8 @@ func readBytesNUL(data []byte) ([]byte, []byte, bool) {
 	return nil, data, false
 }
 
+//read packet len
+//https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
 func readLenEncUint(data []byte) (uint64, []byte, bool) {
 	if len(data) < 1 {
 		return 0, data, false
@@ -1190,6 +1205,7 @@ func (fsm *MySQLFSM) readResultSetHeaderPacket() (int, error) {
 	return 0, ErrMalformPkt
 }
 
+//read server status
 func readStatus(b []byte) statusFlag {
 	return statusFlag(b[0]) | statusFlag(b[1])<<8
 }
@@ -1375,6 +1391,8 @@ type SqlCompareRes struct {
 	ErrDesc string        `json:"errdesc"`
 }
 
+//Compare the value of each column in the result set
+//* converting the column value to a string
 func CompareValue(a driver.Value, b driver.Value) (bool, error) {
 	var as string
 	err := convertAssignRows(&as, a)
@@ -1392,6 +1410,7 @@ func CompareValue(a driver.Value, b driver.Value) (bool, error) {
 	return true, nil
 }
 
+//Summarize statistics to the global  var
 func (fsm *MySQLFSM) AddStatis() {
 	Sm.Lock()
 	defer Sm.Unlock()
@@ -1532,11 +1551,11 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	res.ErrCode = 0
 	fsm.execSuccNum++
 
-	fmt.Println("-------compare result -------------")
+	/*fmt.Println("-------compare result -------------")
 	fmt.Println("exec errno: ", rr.ErrNO, pr.errNo)
 	fmt.Println("exec time: ", rrSqlExecTime, prSqlExecTime)
 	fmt.Println("exec res rownum: ", rrlen, prlen)
 	fmt.Println("exec res row detail : ", rrrows, prrows)
-	fmt.Println("-------compare result -------------")
+	fmt.Println("-------compare result -------------")*/
 	return res
 }
