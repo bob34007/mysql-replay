@@ -220,9 +220,30 @@ func StaticPrint() {
 	stream.Sm.Lock()
 	defer stream.Sm.Unlock()
 	fmt.Println("-------compare result -------------")
-	fmt.Println("exec sql : ", stream.ExecSqlNum)
-	fmt.Println("exec sql succ :", stream.ExecSuccNum)
-	fmt.Println("exec sql fail :", stream.ExecFailNum)
+	fmt.Println("compare sql : ", stream.ExecSqlNum)
+	fmt.Println("compare succ :", stream.ExecSuccNum)
+	fmt.Println("compare fail :", stream.ExecFailNum)
+	fmt.Println("exec time fail :", stream.ExecTimeNotEqual)
+	fmt.Println("row count fail :", stream.RowCountNotequal)
+	fmt.Println("row detail fail :", stream.RowDetailNotEqual)
+	fmt.Println()
+	fmt.Println("-------from packet -------------")
+	fmt.Println("exec succ sql count :", stream.PrExecSuccCount)
+	fmt.Println("exec fail sql count :", stream.PrExecFailCount)
+	fmt.Println("exec time :", stream.PrExecTimeCount)
+	fmt.Println("reslut rows :", stream.PrExecRowCount)
+	if stream.ExecSqlNum > 0 {
+		fmt.Println("one sql exec  time:", stream.PrExecTimeCount/stream.ExecSqlNum)
+	}
+	fmt.Println()
+	fmt.Println("-------from replay server -------------")
+	fmt.Println("exec succ sql count :", stream.RrExecSuccCount)
+	fmt.Println("exec fail sql count :", stream.RrExecFailCount)
+	fmt.Println("exec time  :", stream.RrExecTimeCount)
+	fmt.Println("reslut rows :", stream.RrExecRowCount)
+	if stream.ExecSqlNum > 0 {
+		fmt.Println("one sql exec  time:", stream.RrExecTimeCount/stream.ExecSqlNum)
+	}
 	fmt.Println("-------compare result -------------")
 }
 
@@ -307,6 +328,7 @@ func (h *replayEventHandler) handshake(ctx context.Context, schema string) error
 	return err
 }
 
+//return a signal
 func (h *replayEventHandler) getConn(ctx context.Context) (*sql.Conn, error) {
 	var err error
 	if h.pool == nil {

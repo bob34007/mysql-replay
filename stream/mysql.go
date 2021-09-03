@@ -17,10 +17,21 @@ import (
 )
 
 var (
-	Sm          sync.Mutex
-	ExecSqlNum  uint64
-	ExecSuccNum uint64
-	ExecFailNum uint64
+	Sm                sync.Mutex
+	ExecSqlNum        uint64
+	ExecSuccNum       uint64
+	ExecFailNum       uint64
+	ExecTimeNotEqual  uint64
+	RowCountNotequal  uint64
+	RowDetailNotEqual uint64
+	PrExecTimeCount   uint64
+	PrExecRowCount    uint64
+	PrExecSuccCount   uint64
+	PrExecFailCount   uint64
+	RrExecTimeCount   uint64
+	RrExecRowCount    uint64
+	RrExecSuccCount   uint64
+	RrExecFailCount   uint64
 )
 
 const (
@@ -143,9 +154,20 @@ type MySQLFSM struct {
 	count   int
 	pr      *PacketRes
 	//Rr          *ReplayRes
-	execSqlNum  uint64
-	execSuccNum uint64
-	execFailNum uint64
+	execSqlNum        uint64
+	execSuccNum       uint64
+	execFailNum       uint64
+	execTimeNotEqual  uint64
+	rowCountNotequal  uint64
+	rowDetailNotEqual uint64
+	prRowNumCount     uint64
+	prExecTimeCount   uint64
+	prExecSuccCount   uint64
+	prExecFailCount   uint64
+	rrRowNumCount     uint64
+	rrExecTimeCount   uint64
+	rrExecSuccCount   uint64
+	rrExecFailCount   uint64
 }
 
 func (fsm *MySQLFSM) State() int { return fsm.state }
@@ -223,7 +245,10 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		fsm.handleHandshakeResponse()
 	} else if fsm.state == StateComQuery {
 		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-		fsm.handleReadSQLResult()
+		err := fsm.handleReadSQLResult()
+		if err != nil {
+			fsm.log.Warn("read packet fail ," + err.Error())
+		}
 		if fsm.pr.tRows != nil {
 			if fsm.pr.tRows.rs.done {
 				fsm.pr.ifReadResEnd = true
@@ -238,7 +263,10 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		}
 	} else if fsm.state == StateComStmtExecute {
 		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-		fsm.handleReadPrepareExecResult()
+		err := fsm.handleReadPrepareExecResult()
+		if err != nil {
+			fsm.log.Warn("read packet fail ," + err.Error())
+		}
 		if fsm.pr.bRows != nil {
 			if fsm.pr.bRows.rs.done {
 				fsm.pr.ifReadResEnd = true
@@ -1072,11 +1100,6 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 			rows.fsm = fsm
 		}
 		rows = fsm.pr.bRows
-		fsm.log.Info("the column number is " +
-			fmt.Sprintf("%d", fsm.pr.columnNum) +
-			", and read " +
-			fmt.Sprintf("%d", len(rows.rs.columns)) +
-			" columns ")
 		if !fsm.pr.readColEnd {
 			columns, err := fsm.readColumns(1)
 			if err != nil {
@@ -1090,6 +1113,11 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 			if len(rows.rs.columns) == fsm.pr.columnNum {
 				fsm.pr.readColEnd = true
 			}
+			fsm.log.Info("the column number is " +
+				fmt.Sprintf("%d", fsm.pr.columnNum) +
+				", and read " +
+				fmt.Sprintf("%d", len(rows.rs.columns)) +
+				" columns ")
 			return nil
 		}
 
@@ -1370,9 +1398,32 @@ func (fsm *MySQLFSM) AddStatis() {
 	ExecSqlNum += fsm.execSqlNum
 	ExecSuccNum += fsm.execSuccNum
 	ExecFailNum += fsm.execFailNum
+	PrExecRowCount += fsm.prRowNumCount
+	PrExecTimeCount += fsm.prExecTimeCount
+	PrExecSuccCount += fsm.prExecSuccCount
+	PrExecFailCount += fsm.prExecFailCount
+	RrExecRowCount += fsm.rrRowNumCount
+	RrExecTimeCount += fsm.rrExecTimeCount
+	RrExecFailCount += fsm.rrExecFailCount
+	RrExecSuccCount += fsm.rrExecSuccCount
+	ExecTimeNotEqual += fsm.execTimeNotEqual
+	RowCountNotequal += fsm.rowCountNotequal
+	RowDetailNotEqual += fsm.rowDetailNotEqual
+
+	fsm.prRowNumCount = 0
+	fsm.prExecTimeCount = 0
+	fsm.rrRowNumCount = 0
+	fsm.rrExecTimeCount = 0
 	fsm.execSqlNum = 0
 	fsm.execSuccNum = 0
 	fsm.execFailNum = 0
+	fsm.prExecFailCount = 0
+	fsm.prExecSuccCount = 0
+	fsm.rrExecFailCount = 0
+	fsm.rrExecSuccCount = 0
+	fsm.execTimeNotEqual = 0
+	fsm.rowCountNotequal = 0
+	fsm.rowDetailNotEqual = 0
 }
 
 //compare result from packet and result from tidb server
@@ -1387,11 +1438,36 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	res.Sql = rr.SqlStatment
 	res.Values = rr.Values
 	fsm.execSqlNum++
+	prSqlExecTime := pr.sqlEndTime - pr.sqlBeginTime
+	fsm.prExecTimeCount += uint64(prSqlExecTime)
+	rrSqlExecTime := rr.SqlEndTime - rr.SqlBeginTime
+	fsm.rrExecTimeCount += uint64(rrSqlExecTime)
+	var prlen int = 0
+	var rrlen int = 0
+	if pr.tRows == nil {
+		prlen = len(pr.bRows.rs.columnValue)
+	} else {
+		prlen = len(pr.tRows.rs.columnValue)
+	}
+	rrlen = len(rr.ColValues)
+	fsm.prRowNumCount += uint64(prlen)
+	fsm.rrRowNumCount += uint64(rrlen)
 
 	if fsm.execSqlNum/10 == 0 {
 		defer fsm.AddStatis()
 	}
 
+	if rr.ErrNO != 0 {
+		fsm.rrExecFailCount++
+	} else {
+		fsm.rrExecSuccCount++
+	}
+
+	if pr.errNo != 0 {
+		fsm.prExecFailCount++
+	} else {
+		fsm.prExecSuccCount++
+	}
 	//compare errcode
 	if rr.ErrNO != pr.errNo {
 		res.ErrCode = 1
@@ -1401,30 +1477,23 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	}
 
 	//compare exec time
-	prSqlExecTime := pr.sqlEndTime - pr.sqlBeginTime
-	rrSqlExecTime := rr.SqlEndTime - rr.SqlBeginTime
-	if (rrSqlExecTime > prSqlExecTime+prSqlExecTime ||
-		prSqlExecTime > rrSqlExecTime+rrSqlExecTime) &&
+
+	if (rrSqlExecTime > prSqlExecTime+prSqlExecTime) &&
 		math.Abs((float64)(prSqlExecTime-rrSqlExecTime)) > 150 {
 		res.ErrCode = 2
 		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
 		fsm.execFailNum++
+		fsm.execTimeNotEqual++
 		return res
 	}
 
 	//compare  result row num
-	var prlen int = 0
-	var rrlen int = 0
-	if pr.tRows == nil {
-		prlen = len(pr.bRows.rs.columnValue)
-	} else {
-		prlen = len(pr.tRows.rs.columnValue)
-	}
-	rrlen = len(rr.ColValues)
+
 	if prlen != rrlen {
 		res.ErrCode = 3
 		res.ErrDesc = fmt.Sprintf("%v-%v", prlen, rrlen)
 		fsm.execFailNum++
+		fsm.rowCountNotequal++
 		return res
 	}
 
@@ -1442,6 +1511,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 		if len(rrrows[j]) != len(prrows[j]) {
 			res.ErrCode = 4
 			fsm.execFailNum++
+			fsm.rowDetailNotEqual++
 			return res
 		}
 		for k := 0; k < len(rrrows[j]); k++ {
@@ -1453,6 +1523,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 						" value failed to be resolved ," + e.Error()
 				}
 				fsm.execFailNum++
+				fsm.rowDetailNotEqual++
 				return res
 			}
 		}

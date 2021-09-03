@@ -418,5 +418,6 @@ func (h *eventHandler) OnPacket(pkt MySQLPacket) {
 }
 
 func (h *eventHandler) OnClose() {
+
 	h.impl.OnClose()
 }
