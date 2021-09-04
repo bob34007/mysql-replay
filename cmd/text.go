@@ -210,14 +210,22 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 		}
 	}
 
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+		}
+
+	}()
+
 	if h.needCompareRes {
 		res := h.fsm.CompareRes(h.Rr)
 		if res.ErrCode != 0 {
 			logstr, err := json.Marshal(res)
 			if err != nil {
 				h.log.Warn("compare result marshal to json error " + err.Error())
+				return
 			}
-			h.log.Warn(string(logstr))
+			h.log.Info(string(logstr))
 		}
 	}
 }
