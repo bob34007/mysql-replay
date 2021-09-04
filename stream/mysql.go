@@ -254,7 +254,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 				fsm.pr.ifReadResEnd = true
 				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 				//fmt.Println(fsm.pr.sqlEndTime)
-				fsm.log.Info("the query exec time is :" +
+				fsm.log.Debug("the query exec time is :" +
 					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 					"ms")
 			}
@@ -271,8 +271,8 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			if fsm.pr.bRows.rs.done {
 				fsm.pr.ifReadResEnd = true
 				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				fmt.Println(fsm.pr.sqlEndTime)
-				fsm.log.Info("the query exec time is :" +
+				//fmt.Println(fsm.pr.sqlEndTime)
+				fsm.log.Debug("the query exec time is :" +
 					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 					"ms")
 			}
@@ -354,7 +354,7 @@ func (fsm *MySQLFSM) set(to int, msg ...string) {
 	if len(msg) > 0 {
 		tmpl += ": " + msg[0]
 	}
-	fsm.log.Sugar().Debugf(tmpl, StateName(from), StateName(to))
+	fsm.log.Debug(tmpl + StateName(from) + StateName(to))
 }
 
 func (fsm *MySQLFSM) assertDir(exp reassembly.TCPFlowDirection) bool {
@@ -369,13 +369,13 @@ func (fsm *MySQLFSM) assertDataByte(offset int, exp byte) bool {
 	return data[offset] == exp
 }
 
-func (fsm *MySQLFSM) assertDataChunk(offset int, exp []byte) bool {
+/*func (fsm *MySQLFSM) assertDataChunk(offset int, exp []byte) bool {
 	data := fsm.data.Bytes()
 	if len(data) < offset+len(exp) {
 		return false
 	}
 	return bytes.Equal(data[offset:offset+len(exp)], exp)
-}
+}*/
 
 func (fsm *MySQLFSM) isClientCommand(cmd byte) bool {
 	if !fsm.assertDir(reassembly.TCPDirClientToServer) {
@@ -398,6 +398,7 @@ func (fsm *MySQLFSM) isHandshakeRequest() bool {
 func (fsm *MySQLFSM) handleInitPacket() {
 	if !fsm.load(0) {
 		fsm.set(StateUnknown, "init: cannot load packet")
+		fsm.log.Warn("init :load packet fail")
 		return
 	}
 	if fsm.isClientCommand(comQuery) {
@@ -417,6 +418,8 @@ func (fsm *MySQLFSM) handleInitPacket() {
 			fsm.set(StateUnknown, fmt.Sprintf("init: skip client command(0x%02x)", fsm.data.Bytes()[0]))
 		} else {
 			fsm.set(StateUnknown, "init: unsupported packet")
+			//The first character indicates the current command type
+			fsm.log.Warn("unsupported command :" + string(fsm.data.Bytes()[:1]))
 		}
 	}
 }
@@ -436,14 +439,25 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 	data := fsm.data.Bytes()[1:]
 	if id, data, ok = readUint32(data); !ok {
 		fsm.set(StateUnknown, "stmt execute: cannot read stmt id")
+		var n int = 4
+		if len(data) < 4 {
+			n = len(data)
+		}
+		fsm.log.Warn("can not read stmt id from data :" + string(data[:n]))
 		return
 	}
 	if stmt, ok = fsm.stmts[id]; !ok {
 		fsm.set(StateUnknown, "stmt execute: unknown stmt id")
+		fsm.log.Info("unknown stmt id " + fmt.Sprintf("%v", id))
 		return
 	}
 	if _, data, ok = readBytesN(data, 5); !ok {
 		fsm.set(StateUnknown, "stmt execute: cannot read flag and iteration-count")
+		var n int = 5
+		if len(data) < 5 {
+			n = len(data)
+		}
+		fsm.log.Warn("can not read flag and iteration-count from ," + string(data[:n]))
 		return
 	}
 	if stmt.NumParams > 0 {
@@ -455,10 +469,17 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 		)
 		if nullBitmaps, data, ok = readBytesN(data, (stmt.NumParams+7)>>3); !ok {
 			fsm.set(StateUnknown, "stmt execute: cannot read null-bitmap")
+			var n int = stmt.NumParams + 7>>3
+			if len(data) < (stmt.NumParams + 7>>3) {
+				n = len(data)
+			}
+			fsm.log.Warn("can not read null bitmap from " + string(data[:n]))
 			return
 		}
 		if len(data) < 1+2*stmt.NumParams {
 			fsm.set(StateUnknown, "stmt execute: cannot read params")
+			fsm.log.Warn("can not read params ,Package is not complete " +
+				fmt.Sprintf("%v-%v", len(data), 1+2*stmt.NumParams))
 			return
 		}
 		if data[0] == 1 {
@@ -470,6 +491,7 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 		} else {
 			if stmt.types == nil {
 				fsm.set(StateUnknown, "stmt execute: param types is missing")
+				fsm.log.Warn("can get stmt param type ")
 				return
 			}
 			paramTypes = stmt.types
@@ -478,6 +500,7 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 		params, err = parseExecParams(stmt, nullBitmaps, paramTypes, paramValues)
 		if err != nil {
 			fsm.set(StateUnknown, "stmt execute: "+err.Error())
+			fsm.log.Warn("parse exec params fail " + err.Error())
 			return
 		}
 	}
@@ -492,6 +515,7 @@ func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
 	/*s := strings.ToLower(query)
 	s1 := strings.TrimSpace(s)
 	return strings.HasPrefix(s1, "select")*/
+	fsm.log.Debug(query)
 	if len(query) < 6 {
 		return false
 	}
@@ -523,6 +547,12 @@ func (fsm *MySQLFSM) handleComStmtCloseNoLoad() {
 	stmtID, _, ok := readUint32(fsm.data.Bytes()[1:])
 	if !ok {
 		fsm.set(StateUnknown, "stmt close: cannot read stmt id")
+		var n int = 4
+		if len(fsm.data.Bytes()[1:]) < 4 {
+			n = len(fsm.data.Bytes()[1:])
+		}
+
+		fsm.log.Warn("can not read stmt id from data ," + string(fsm.data.Bytes()[1:][:n]))
 		return
 	}
 	fsm.stmt = fsm.stmts[stmtID]
@@ -539,14 +569,18 @@ func (fsm *MySQLFSM) handleComStmtPrepareRequestNoLoad() {
 func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 	if !fsm.load(1) {
 		fsm.set(StateUnknown, "stmt prepare: cannot load packet")
+		fsm.log.Warn("parse prepare reaponse fail , can not load packet " +
+			fmt.Sprintf("%v", len(fsm.packets)))
 		return
 	}
 	if !fsm.assertDir(reassembly.TCPDirServerToClient) {
 		fsm.set(StateUnknown, "stmt prepare: unexpected packet direction")
+		fsm.log.Warn("parse prepare reaponse fail , unexpected packet direction")
 		return
 	}
 	if !fsm.assertDataByte(0, 0) {
 		fsm.set(StateUnknown, "stmt prepare: not ok")
+		fsm.log.Info("prepare fail on server ")
 		return
 	}
 	var (
@@ -557,14 +591,32 @@ func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 	data := fsm.data.Bytes()[1:]
 	if stmtID, data, ok = readUint32(data); !ok {
 		fsm.set(StateUnknown, "stmt prepare: cannot read stmt id")
+		var n int = 4
+		if len(data) < 4 {
+			n = len(data)
+		}
+		fsm.log.Warn("can not read stmt id from prepare response packet," +
+			string(data[:n]))
 		return
 	}
 	if _, data, ok = readUint16(data); !ok {
 		fsm.set(StateUnknown, "stmt prepare: cannot read number of columns")
+		var n int = 2
+		if len(data) < 2 {
+			n = len(data)
+		}
+		fsm.log.Warn("can not read number of colunms  from prepare response packet," +
+			string(data[:n]))
 		return
 	}
-	if numParams, data, ok = readUint16(data); !ok {
+	if numParams, _, ok = readUint16(data); !ok {
 		fsm.set(StateUnknown, "stmt prepare: cannot read number of params")
+		var n int = 2
+		if len(data) < 2 {
+			n = len(data)
+		}
+		fsm.log.Warn("can not read number of params  from prepare response packet," +
+			string(data[:n]))
 		return
 	}
 	fsm.stmt.ID = stmtID
@@ -577,10 +629,13 @@ func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 func (fsm *MySQLFSM) handleHandshakeResponse() {
 	if !fsm.load(1) {
 		fsm.set(StateUnknown, "handshake: cannot load packet")
+		fsm.log.Warn("parse prepare reaponse fail , can not load packet " +
+			fmt.Sprintf("%v", len(fsm.packets)))
 		return
 	}
 	if !fsm.assertDir(reassembly.TCPDirClientToServer) {
 		fsm.set(StateUnknown, "handshake: unexpected packet direction")
+		fsm.log.Warn("parse prepare reaponse fail , unexpected packet direction")
 		return
 	}
 	var (
@@ -591,6 +646,11 @@ func (fsm *MySQLFSM) handleHandshakeResponse() {
 	data := fsm.data.Bytes()
 	if bs, data, ok = readBytesN(data, 2); !ok {
 		fsm.set(StateUnknown, "handshake: cannot read capability flags")
+		var n int = 2
+		if len(data) < 2 {
+			n = len(data)
+		}
+		fsm.log.Warn("cannot read capability flags from packet ," + string(data[:n]))
 		return
 	}
 	flags |= clientFlag(bs[0])
@@ -598,6 +658,11 @@ func (fsm *MySQLFSM) handleHandshakeResponse() {
 	if flags&clientProtocol41 > 0 {
 		if bs, data, ok = readBytesN(data, 2); !ok {
 			fsm.set(StateUnknown, "handshake: cannot read extended capability flags")
+			var n int = 2
+			if len(data) < 2 {
+				n = len(data)
+			}
+			fsm.log.Warn("cannot read extended capability flags from packet ," + string(data[:n]))
 			return
 		}
 		flags |= clientFlag(bs[0]) << 16
@@ -1005,7 +1070,7 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 		//read cloumn num from packet
 		fsm.pr.columnNum, err = fsm.readResultSetHeaderPacket()
 		if err != nil {
-			fsm.log.Info("read column from packet fail " + err.Error() +
+			fsm.log.Warn("read column from packet fail " + err.Error() +
 				fmt.Sprintf("%d", fsm.pr.packetnum) +
 				fmt.Sprintf("%d", len(fsm.packets)))
 			fsm.pr.ifReadResEnd = true
@@ -1018,8 +1083,8 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 		if fsm.pr.columnNum == 0 {
 			fsm.pr.ifReadResEnd = true
 		}
-		fsm.log.Info("read " + fmt.Sprintf("%d", fsm.pr.columnNum) + " columns from packets")
-		fsm.log.Info(fmt.Sprintf("%v", fsm.pr.ifReadResEnd))
+		fsm.log.Debug("read " + fmt.Sprintf("%d", fsm.pr.columnNum) + " columns from packets")
+		fsm.log.Debug(fmt.Sprintf("%v", fsm.pr.ifReadResEnd))
 		return nil
 	}
 
@@ -1036,13 +1101,13 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 		if !fsm.pr.readColEnd {
 			columns, err := fsm.readColumns(1)
 			if err != nil {
-				fsm.log.Info("read columns from packet fail " +
+				fsm.log.Warn("read columns from packet fail " +
 					err.Error() + fmt.Sprintf("%d", fsm.pr.packetnum) +
 					fmt.Sprintf("%d", len(fsm.packets)))
 				return err
 			}
 			rows.rs.columns = append(rows.rs.columns, columns...)
-			fsm.log.Info(fmt.Sprintf("%d", len(rows.rs.columns)))
+			fsm.log.Debug(fmt.Sprintf("%d", len(rows.rs.columns)))
 			if len(rows.rs.columns) == fsm.pr.columnNum {
 				fsm.pr.readColEnd = true
 			}
@@ -1055,7 +1120,7 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 			if data[0] == iEOF && !fsm.pr.ifReadColEndEofPacket {
 				fsm.pr.packetnum++
 				fsm.pr.ifReadColEndEofPacket = true
-				fsm.log.Info("read packet reach EOF , process will ignore EOF ,wait next packet ")
+				fsm.log.Debug("read packet reach EOF , process will ignore EOF ,wait next packet ")
 				return nil
 			}
 		}
@@ -1069,10 +1134,10 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 					rows.rs.columnValue = append(rows.rs.columnValue, values)
 				}
 				if err == io.EOF {
-					fsm.log.Info("read repose end ")
+					fsm.log.Debug("read repose end ")
 					return nil
 				} else if err != nil {
-					fsm.log.Info("resd rows from packet error" + err.Error())
+					fsm.log.Warn("resd rows from packet error" + err.Error())
 					return err
 				}
 			}
@@ -1088,7 +1153,7 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 	if fsm.pr.columnNum == 0 {
 		fsm.pr.columnNum, err = fsm.readResultSetHeaderPacket()
 		if err != nil {
-			fsm.log.Info("read column from packet fail , " +
+			fsm.log.Warn("read column from packet fail , " +
 				err.Error() +
 				fmt.Sprintf("%d", fsm.pr.packetnum) +
 				fmt.Sprintf("%d", len(fsm.packets)))
@@ -1102,7 +1167,7 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 		if fsm.pr.columnNum == 0 {
 			fsm.pr.ifReadResEnd = true
 		}
-		fsm.log.Info("read " + fmt.Sprintf("%d", fsm.pr.columnNum) + " columns from packets")
+		fsm.log.Debug("read " + fmt.Sprintf("%d", fsm.pr.columnNum) + " columns from packets")
 		return nil
 	}
 
@@ -1118,7 +1183,7 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 		if !fsm.pr.readColEnd {
 			columns, err := fsm.readColumns(1)
 			if err != nil {
-				fsm.log.Info("read columns from packet fail " + err.Error() +
+				fsm.log.Warn("read columns from packet fail " + err.Error() +
 					fmt.Sprintf("%d", fsm.pr.packetnum) +
 					fmt.Sprintf("%d", len(fsm.packets)))
 				fsm.pr.readColEnd = true
@@ -1128,7 +1193,7 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 			if len(rows.rs.columns) == fsm.pr.columnNum {
 				fsm.pr.readColEnd = true
 			}
-			fsm.log.Info("the column number is " +
+			fsm.log.Debug("the column number is " +
 				fmt.Sprintf("%d", fsm.pr.columnNum) +
 				", and read " +
 				fmt.Sprintf("%d", len(rows.rs.columns)) +
@@ -1143,7 +1208,7 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 			if data[0] == iEOF && !fsm.pr.ifReadColEndEofPacket {
 				fsm.pr.packetnum++
 				fsm.pr.ifReadColEndEofPacket = true
-				fsm.log.Info("read packet reach EOF , process will ignore EOF ,wait next packet ")
+				fsm.log.Debug("read packet reach EOF , process will ignore EOF ,wait next packet ")
 				return nil
 			}
 		}
@@ -1156,11 +1221,11 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 					rows.rs.columnValue = append(rows.rs.columnValue, values)
 				}
 				if err == io.EOF {
-					fsm.log.Info("read respose end ")
+					fsm.log.Debug("read respose end ")
 					return nil
 				}
 				if err != nil {
-					fsm.log.Info("resd rows from packet error" +
+					fsm.log.Debug("resd rows from packet error" +
 						err.Error())
 					return err
 				}
@@ -1540,6 +1605,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 				if e != nil {
 					res.ErrDesc = "data is considered inconsistent because the" +
 						" value failed to be resolved ," + e.Error()
+					fsm.log.Warn(res.ErrDesc)
 				}
 				fsm.execFailNum++
 				fsm.rowDetailNotEqual++
@@ -1551,11 +1617,5 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	res.ErrCode = 0
 	fsm.execSuccNum++
 
-	/*fmt.Println("-------compare result -------------")
-	fmt.Println("exec errno: ", rr.ErrNO, pr.errNo)
-	fmt.Println("exec time: ", rrSqlExecTime, prSqlExecTime)
-	fmt.Println("exec res rownum: ", rrlen, prlen)
-	fmt.Println("exec res row detail : ", rrrows, prrows)
-	fmt.Println("-------compare result -------------")*/
 	return res
 }

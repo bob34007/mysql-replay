@@ -199,6 +199,9 @@ type replayEventHandler struct {
 
 func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 	//ctx := context.Background()
+	if h.fsm == nil {
+		h.fsm = e.Fsm
+	}
 	err := h.ApplyEvent(h.ctx, e)
 	if err == nil {
 		if mysqlError, ok := err.(*mysql.MySQLError); ok {
@@ -208,7 +211,6 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 	}
 
 	if h.needCompareRes {
-		h.fsm = e.Fsm
 		res := h.fsm.CompareRes(h.Rr)
 		if res.ErrCode != 0 {
 			logstr, err := json.Marshal(res)
@@ -291,7 +293,6 @@ LOOP:
 		h.quit(false)
 	default:
 		h.log.Warn("unknown event", zap.Any("value", e))
-		//continue
 	}
 	if err != nil {
 		if sqlErr := errors.Unwrap(err); sqlErr == context.DeadlineExceeded || sqlErr == sql.ErrConnDone || sqlErr == mysql.ErrInvalidConn {
@@ -502,7 +503,7 @@ func (h *replayEventHandler) GetColNames(f *sql.Rows) {
 	var err error
 	h.Rr.ColNames, err = f.Columns()
 	if err != nil {
-		h.log.Info("read column name err ,", zap.Error(err))
+		h.log.Warn("read column name err ,", zap.Error(err))
 	}
 }
 
