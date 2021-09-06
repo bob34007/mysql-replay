@@ -104,8 +104,9 @@ func NewTextDumpCommand() *cobra.Command {
 //replay server
 func NewTextDumpReplayCommand() *cobra.Command {
 	var (
-		options = stream.FactoryOptions{Synchronized: true}
-		dsn     string
+		options   = stream.FactoryOptions{Synchronized: true}
+		dsn       string
+		filterStr string
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -129,6 +130,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 					pconn:       conn,
 					log:         log,
 					dsn:         dsn,
+					filterStr:   filterStr,
 					MySQLConfig: MySQLConfig,
 					ctx:         context.Background(),
 					Rr:          new(stream.ReplayRes),
@@ -169,7 +171,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			return nil
 		},
 	}
-
+	cmd.Flags().StringVarP(&filterStr, "filter", "f", "select", "replay filtering rules")
 	cmd.Flags().StringVarP(&dsn, "dsn", "d", "", "replay server dsn")
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
 	return cmd
@@ -183,18 +185,20 @@ type statement struct {
 
 //Used for replay  SQL
 type replayEventHandler struct {
-	pconn          stream.ConnID
-	dsn            string
-	fsm            *stream.MySQLFSM
-	log            *zap.Logger
-	MySQLConfig    *mysql.Config
-	schema         string
-	pool           *sql.DB
-	conn           *sql.Conn
-	stmts          map[uint64]statement
-	ctx            context.Context
-	needCompareRes bool
-	Rr             *stream.ReplayRes
+	pconn               stream.ConnID
+	dsn                 string
+	fsm                 *stream.MySQLFSM
+	log                 *zap.Logger
+	MySQLConfig         *mysql.Config
+	schema              string
+	pool                *sql.DB
+	conn                *sql.Conn
+	stmts               map[uint64]statement
+	ctx                 context.Context
+	filterStr           string
+	needCompareRes      bool
+	needCompareExecTime bool
+	Rr                  *stream.ReplayRes
 }
 
 func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
@@ -212,12 +216,13 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Println(err)
+			h.log.Warn(err.(string))
 		}
 
 	}()
 
 	if h.needCompareRes {
+
 		res := h.fsm.CompareRes(h.Rr)
 		if res.ErrCode != 0 {
 			logstr, err := json.Marshal(res)
@@ -236,11 +241,32 @@ func StaticPrint() {
 	defer stream.Sm.Unlock()
 	fmt.Println("-------compare result -------------")
 	fmt.Println("compare sql : ", stream.ExecSqlNum)
-	fmt.Println("compare succ :", stream.ExecSuccNum)
-	fmt.Println("compare fail :", stream.ExecFailNum)
-	fmt.Println("exec time fail :", stream.ExecTimeNotEqual)
-	fmt.Println("row count fail :", stream.RowCountNotequal)
-	fmt.Println("row detail fail :", stream.RowDetailNotEqual)
+	fmt.Print("compare succ :", stream.ExecSuccNum, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.ExecSuccNum*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
+	fmt.Print("compare fail :", stream.ExecFailNum, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.ExecFailNum*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
+	fmt.Println()
+	fmt.Print("exec time fail :", stream.ExecTimeNotEqual, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.ExecTimeNotEqual*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
+	fmt.Print("row count fail :", stream.RowCountNotequal, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.RowCountNotequal*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
+	fmt.Print("row detail fail :", stream.RowDetailNotEqual, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.RowDetailNotEqual*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
 	fmt.Println()
 	fmt.Println("-------from packet -------------")
 	fmt.Println("exec succ sql count :", stream.PrExecSuccCount)
@@ -277,21 +303,39 @@ func (h *replayEventHandler) ApplyEvent(ctx context.Context, e stream.MySQLEvent
 LOOP:
 	switch e.Type {
 	case stream.EventQuery:
-		if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
+
+		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
+			if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
+				h.Rr.ColValues = make([][]driver.Value, 0)
+				err = h.execute(ctx, e.Query)
+				h.needCompareRes = true
+			}
+		} else {
 			h.Rr.ColValues = make([][]driver.Value, 0)
 			err = h.execute(ctx, e.Query)
-			h.needCompareRes = true
+			h.needCompareExecTime = true
 		}
 	case stream.EventStmtPrepare:
-		if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
+		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
+			if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
+				err = h.stmtPrepare(ctx, e.StmtID, e.Query)
+			}
+		} else {
 			err = h.stmtPrepare(ctx, e.StmtID, e.Query)
 		}
 	case stream.EventStmtExecute:
-		if _, ok := h.stmts[e.StmtID]; ok {
+		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
+			if _, ok := h.stmts[e.StmtID]; ok {
+				h.Rr.ColValues = make([][]driver.Value, 0)
+				err = h.stmtExecute(ctx, e.StmtID, e.Params)
+				h.needCompareRes = true
+			}
+		} else if _, ok := h.stmts[e.StmtID]; ok {
 			h.Rr.ColValues = make([][]driver.Value, 0)
 			err = h.stmtExecute(ctx, e.StmtID, e.Params)
-			h.needCompareRes = true
+			h.needCompareExecTime = true
 		}
+
 	case stream.EventStmtClose:
 		h.stmtClose(ctx, e.StmtID)
 	case stream.EventHandshake:

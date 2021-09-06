@@ -34,6 +34,23 @@ var (
 	RrExecFailCount   uint64
 )
 
+func init() {
+	ExecSqlNum = 0
+	ExecSuccNum = 0
+	ExecFailNum = 0
+	ExecTimeNotEqual = 0
+	RowCountNotequal = 0
+	RowDetailNotEqual = 0
+	PrExecTimeCount = 0
+	PrExecRowCount = 0
+	PrExecSuccCount = 0
+	PrExecFailCount = 0
+	RrExecTimeCount = 0
+	RrExecRowCount = 0
+	RrExecSuccCount = 0
+	RrExecFailCount = 0
+}
+
 const (
 	StateInit = iota
 	StateUnknown
@@ -253,7 +270,6 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			if fsm.pr.tRows.rs.done {
 				fsm.pr.ifReadResEnd = true
 				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				//fmt.Println(fsm.pr.sqlEndTime)
 				fsm.log.Debug("the query exec time is :" +
 					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 					"ms")
@@ -271,7 +287,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			if fsm.pr.bRows.rs.done {
 				fsm.pr.ifReadResEnd = true
 				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				//fmt.Println(fsm.pr.sqlEndTime)
+				//fmt.Println("fsm.pr.sqlEndTime is :", fsm.pr.sqlEndTime)
 				fsm.log.Debug("the query exec time is :" +
 					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 					"ms")
@@ -1523,14 +1539,15 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	res.Values = rr.Values
 	fsm.execSqlNum++
 	prSqlExecTime := pr.sqlEndTime - pr.sqlBeginTime
+	//fmt.Println("prSqlExecTime :", prSqlExecTime)
 	fsm.prExecTimeCount += uint64(prSqlExecTime)
 	rrSqlExecTime := rr.SqlEndTime - rr.SqlBeginTime
 	fsm.rrExecTimeCount += uint64(rrSqlExecTime)
 	var prlen int = 0
 	var rrlen int = 0
-	if pr.tRows == nil {
+	if pr.bRows != nil {
 		prlen = len(pr.bRows.rs.columnValue)
-	} else {
+	} else if pr.tRows != nil {
 		prlen = len(pr.tRows.rs.columnValue)
 	}
 	rrlen = len(rr.ColValues)
