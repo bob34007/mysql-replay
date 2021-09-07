@@ -1654,13 +1654,23 @@ type SqlCompareExecTimeRes struct {
 // errcode 2: exec time difference is doubled
 func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 
+	var prSqlExecTime int64
+	var rrSqlExecTime int64
 	res := new(SqlCompareExecTimeRes)
 	pr := fsm.pr
 	res.Sql = rr.SqlStatment
 	fsm.execSqlNum++
-	prSqlExecTime := pr.sqlEndTime - pr.sqlBeginTime
+	if pr.sqlEndTime <= pr.sqlBeginTime {
+		prSqlExecTime = 0
+	} else {
+		prSqlExecTime = pr.sqlEndTime - pr.sqlBeginTime
+	}
 	fsm.prExecTimeCount += uint64(prSqlExecTime)
-	rrSqlExecTime := rr.SqlEndTime - rr.SqlBeginTime
+	if rr.SqlEndTime <= rr.SqlBeginTime {
+		rrSqlExecTime = 0
+	} else {
+		rrSqlExecTime = rr.SqlEndTime - rr.SqlBeginTime
+	}
 	fsm.rrExecTimeCount += uint64(rrSqlExecTime)
 
 	if rr.ErrNO != 0 {
