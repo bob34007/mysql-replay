@@ -114,10 +114,10 @@ func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
 
 //use for save result from replay server
 type ReplayRes struct {
-	ErrNO        uint16
-	ErrDesc      string
-	AffectedRows uint64
-	InsertId     uint64
+	ErrNO   uint16
+	ErrDesc string
+	//AffectedRows uint64
+	//InsertId     uint64
 	SqlStatment  string
 	Values       []interface{}
 	SqlBeginTime int64
@@ -256,7 +256,6 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 
 	if fsm.state == StateInit {
 		fsm.handleInitPacket()
-		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 	} else if fsm.state == StateComStmtPrepare0 {
 		fsm.handleComStmtPrepareResponse()
 	} else if fsm.state == StateHandshake0 {
@@ -269,14 +268,14 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		if fsm.pr.tRows != nil {
 			if fsm.pr.tRows.rs.done {
 				fsm.pr.ifReadResEnd = true
-				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				fsm.log.Debug("the query exec time is :" +
-					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
-					"ms")
 			}
 		}
 		if fsm.pr.ifReadResEnd {
 			fsm.set(StateComQuery1)
+			fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+			fsm.log.Debug("the query exec time is :" +
+				fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
+				"ms")
 		}
 	} else if fsm.state == StateComStmtExecute {
 		err := fsm.handleReadPrepareExecResult()
@@ -286,16 +285,22 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		if fsm.pr.bRows != nil {
 			if fsm.pr.bRows.rs.done {
 				fsm.pr.ifReadResEnd = true
-				fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-				//fmt.Println("fsm.pr.sqlEndTime is :", fsm.pr.sqlEndTime)
-				fsm.log.Debug("the query exec time is :" +
-					fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
-					"ms")
 			}
 		}
 		if fsm.pr.ifReadResEnd {
 			fsm.set(StateComStmtExecute1)
+			fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+			fsm.log.Debug("sql end time is :" + fmt.Sprintf("%v", fsm.pr.sqlEndTime))
+			fsm.log.Debug("the query exec time is :" +
+				fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
+				"ms")
 		}
+	}
+
+	if (fsm.state == StateComQuery || fsm.state == StateComStmtExecute) &&
+		fsm.pr.sqlBeginTime == 0 {
+		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+		fsm.log.Debug("sql begin time is :" + fmt.Sprintf("%v", fsm.pr.sqlBeginTime))
 	}
 }
 
@@ -419,6 +424,7 @@ func (fsm *MySQLFSM) handleInitPacket() {
 	}
 	if fsm.isClientCommand(comQuery) {
 		fsm.handleComQueryNoLoad()
+
 	} else if fsm.isClientCommand(comStmtExecute) {
 		fsm.handleComStmtExecuteNoLoad()
 	} else if fsm.isClientCommand(comStmtPrepare) {
@@ -1539,7 +1545,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	res.Values = rr.Values
 	fsm.execSqlNum++
 	prSqlExecTime := pr.sqlEndTime - pr.sqlBeginTime
-	//fmt.Println("prSqlExecTime :", prSqlExecTime)
+
 	fsm.prExecTimeCount += uint64(prSqlExecTime)
 	rrSqlExecTime := rr.SqlEndTime - rr.SqlBeginTime
 	fsm.rrExecTimeCount += uint64(rrSqlExecTime)
@@ -1629,6 +1635,75 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 				return res
 			}
 		}
+	}
+
+	res.ErrCode = 0
+	fsm.execSuccNum++
+
+	return res
+}
+
+type SqlCompareExecTimeRes struct {
+	Sql     string `json:"sql"`
+	ErrCode int    `json:"errcode"`
+	ErrDesc string `json:"errdesc"`
+}
+
+//compare result from packet and result from tidb server
+// errcode 1: errcode not equal and not dead lock or lock wait time out or duplicate key
+// errcode 2: exec time difference is doubled
+func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
+
+	res := new(SqlCompareExecTimeRes)
+	pr := fsm.pr
+	res.Sql = rr.SqlStatment
+	fsm.execSqlNum++
+	prSqlExecTime := pr.sqlEndTime - pr.sqlBeginTime
+	fsm.prExecTimeCount += uint64(prSqlExecTime)
+	rrSqlExecTime := rr.SqlEndTime - rr.SqlBeginTime
+	fsm.rrExecTimeCount += uint64(rrSqlExecTime)
+
+	if rr.ErrNO != 0 {
+		fsm.rrExecFailCount++
+		//fmt.Println(res.Sql, rr.ErrNO)
+	} else {
+		fsm.rrExecSuccCount++
+	}
+
+	if pr.errNo != 0 {
+		fsm.prExecFailCount++
+	} else {
+		fsm.prExecSuccCount++
+	}
+
+	if fsm.execSqlNum/10 == 0 {
+		defer fsm.AddStatis()
+	}
+
+	//fmt.Println(rr.ErrNO, pr.errNo, rr.SqlStatment)
+
+	//compare errcode
+	if rr.ErrNO != pr.errNo {
+		if rr.ErrNO != 1032 && rr.ErrNO != 1062 && rr.ErrNO != 1069 &&
+			rr.ErrNO != 1025 && rr.ErrNO != 1213 {
+			res.ErrCode = 1
+			res.ErrDesc = fmt.Sprintf("%v-%v", pr.errNo, rr.ErrNO)
+			fsm.execFailNum++
+			return res
+		} else {
+			fsm.log.Info(fmt.Sprintf("%s:%v-%v", res.Sql, pr.errNo, rr.ErrNO))
+		}
+	}
+
+	//compare exec time
+
+	if (rrSqlExecTime > prSqlExecTime+prSqlExecTime) &&
+		math.Abs((float64)(prSqlExecTime-rrSqlExecTime)) > 150 {
+		res.ErrCode = 2
+		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
+		fsm.execFailNum++
+		fsm.execTimeNotEqual++
+		return res
 	}
 
 	res.ErrCode = 0

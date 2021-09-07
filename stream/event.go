@@ -376,6 +376,7 @@ func (h *eventHandler) Accept(ci gopacket.CaptureInfo, dir reassembly.TCPFlowDir
 	return true
 }
 
+//deal  packet from pacp file
 func (h *eventHandler) OnPacket(pkt MySQLPacket) {
 	h.fsm.Handle(pkt)
 	if !h.fsm.Ready() || !h.fsm.Changed() {

@@ -1,14 +1,11 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"time"
 	"unsafe"
@@ -27,7 +24,7 @@ import (
 )
 
 //dump sql event to files from pcap files
-func NewTextDumpCommand() *cobra.Command {
+/*func NewTextDumpCommand() *cobra.Command {
 	var (
 		options = stream.FactoryOptions{Synchronized: true}
 		output  string
@@ -99,6 +96,7 @@ func NewTextDumpCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
 	return cmd
 }
+*/
 
 //Replay sql from pcap files，and compare reslut from pcap file and
 //replay server
@@ -115,13 +113,17 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			if len(args) == 0 {
 				return cmd.Help()
 			}
+			if filterStr != "select" && filterStr != "all" {
+				log.Error("filtering rules support only select or all")
+				return nil
+			}
 			if len(dsn) == 0 {
 				log.Error("need to specify DSN for replay sql ")
 				return nil
 			}
 			MySQLConfig, err := mysql.ParseDSN(dsn)
 			if err != nil {
-				log.Error("fail to parse DSN to MySQLCongif ,", zap.Error(err))
+				log.Error("fail to parse DSN to MySQLConfig ,", zap.Error(err))
 				return nil
 			}
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
@@ -167,7 +169,11 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				assembler.FlushCloseOlderThan(factory.LastStreamTime().Add(-3 * time.Minute))
 			}
 			assembler.FlushAll()
-			StaticPrint()
+			if filterStr == "select" {
+				StaticPrintForSelect()
+			} else {
+				StaticPrintForExecTime()
+			}
 			return nil
 		},
 	}
@@ -201,16 +207,33 @@ type replayEventHandler struct {
 	Rr                  *stream.ReplayRes
 }
 
+//init values for replay new sql
+func (h *replayEventHandler) rrInit() {
+	rr := h.Rr
+	rr.ErrNO = 0
+	rr.ErrDesc = ""
+	rr.Values = rr.Values[0:0]
+	rr.ColumnNum = 0
+	rr.ColNames = rr.ColNames[0:0]
+	rr.ColValues = rr.ColValues[0:0][0:0]
+	rr.SqlStatment = ""
+	rr.SqlBeginTime = 0
+	rr.SqlEndTime = 0
+}
+
 func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
-	//ctx := context.Background()
 	if h.fsm == nil {
 		h.fsm = e.Fsm
 	}
+	h.rrInit()
 	err := h.ApplyEvent(h.ctx, e)
-	if err == nil {
+	if err != nil {
 		if mysqlError, ok := err.(*mysql.MySQLError); ok {
 			h.Rr.ErrNO = mysqlError.Number
 			h.Rr.ErrDesc = mysqlError.Message
+		} else {
+			h.Rr.ErrNO = 20000
+			h.Rr.ErrDesc = "exec sql fail and coverted to mysql errorstruct err"
 		}
 	}
 
@@ -222,7 +245,6 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 	}()
 
 	if h.needCompareRes {
-
 		res := h.fsm.CompareRes(h.Rr)
 		if res.ErrCode != 0 {
 			logstr, err := json.Marshal(res)
@@ -232,11 +254,66 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 			}
 			h.log.Info(string(logstr))
 		}
+		return
+	}
+
+	if h.needCompareExecTime {
+		res := h.fsm.CompareExecTime(h.Rr)
+		if res.ErrCode != 0 {
+			logstr, err := json.Marshal(res)
+			if err != nil {
+				h.log.Warn("compare result marshal to json error " + err.Error())
+				return
+			}
+			h.log.Info(string(logstr))
+		}
+		return
 	}
 }
 
 //print static message
-func StaticPrint() {
+func StaticPrintForExecTime() {
+	stream.Sm.Lock()
+	defer stream.Sm.Unlock()
+	fmt.Println("-------compare result -------------")
+	fmt.Println("compare sql : ", stream.ExecSqlNum)
+	fmt.Print("compare succ :", stream.ExecSuccNum, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.ExecSuccNum*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
+	fmt.Print("compare fail :", stream.ExecFailNum, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.ExecFailNum*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
+	//fmt.Println()
+	fmt.Print("exec time fail :", stream.ExecTimeNotEqual, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.ExecTimeNotEqual*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
+	fmt.Println()
+	fmt.Println("-------from packet -------------")
+	fmt.Println("exec succ sql count :", stream.PrExecSuccCount)
+	fmt.Println("exec fail sql count :", stream.PrExecFailCount)
+	fmt.Println("exec time :", stream.PrExecTimeCount)
+	if stream.ExecSqlNum > 0 {
+		fmt.Println("exec time avg :", stream.PrExecTimeCount/stream.ExecSqlNum)
+	}
+	fmt.Println()
+	fmt.Println("-------from replay server -------------")
+	fmt.Println("exec succ sql count :", stream.RrExecSuccCount)
+	fmt.Println("exec fail sql count :", stream.RrExecFailCount)
+	fmt.Println("exec time  :", stream.RrExecTimeCount)
+	if stream.ExecSqlNum > 0 {
+		fmt.Println("exec time avg :", stream.RrExecTimeCount/stream.ExecSqlNum)
+	}
+	fmt.Println("-------compare result -------------")
+}
+
+//print static message
+func StaticPrintForSelect() {
 	stream.Sm.Lock()
 	defer stream.Sm.Unlock()
 	fmt.Println("-------compare result -------------")
@@ -300,10 +377,10 @@ func (h *replayEventHandler) OnClose() {
 func (h *replayEventHandler) ApplyEvent(ctx context.Context, e stream.MySQLEvent) error {
 	var err error
 	h.needCompareRes = false
+	h.needCompareExecTime = false
 LOOP:
 	switch e.Type {
 	case stream.EventQuery:
-
 		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
 			if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
 				h.Rr.ColValues = make([][]driver.Value, 0)
@@ -323,19 +400,40 @@ LOOP:
 		} else {
 			err = h.stmtPrepare(ctx, e.StmtID, e.Query)
 		}
+
+		if err != nil {
+			if mysqlError, ok := err.(*mysql.MySQLError); ok {
+				logstr := fmt.Sprintf("prepare statment exec fail ,%s , %d ,%s ",
+					e.Query, mysqlError.Number, mysqlError.Message)
+				h.log.Error(logstr)
+			} else {
+				h.Rr.ErrNO = 20000
+				h.Rr.ErrDesc = "exec sql fail and coverted to mysql errorstruct err"
+			}
+
+		}
 	case stream.EventStmtExecute:
 		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
-			if _, ok := h.stmts[e.StmtID]; ok {
+			_, ok := h.stmts[e.StmtID]
+			if ok {
 				h.Rr.ColValues = make([][]driver.Value, 0)
 				err = h.stmtExecute(ctx, e.StmtID, e.Params)
 				h.needCompareRes = true
 			}
-		} else if _, ok := h.stmts[e.StmtID]; ok {
-			h.Rr.ColValues = make([][]driver.Value, 0)
-			err = h.stmtExecute(ctx, e.StmtID, e.Params)
-			h.needCompareExecTime = true
+		} else {
+			_, ok := h.stmts[e.StmtID]
+			if ok {
+				h.Rr.ColValues = make([][]driver.Value, 0)
+				err = h.stmtExecute(ctx, e.StmtID, e.Params)
+				h.needCompareExecTime = true
+			} else {
+				err := new(mysql.MySQLError)
+				err.Number = 10000
+				err.Message = fmt.Sprintf("%v is not exist , maybe prepare fail", e.StmtID)
+				h.needCompareExecTime = true
+				return err
+			}
 		}
-
 	case stream.EventStmtClose:
 		h.stmtClose(ctx, e.StmtID)
 	case stream.EventHandshake:
@@ -386,7 +484,13 @@ func (h *replayEventHandler) handshake(ctx context.Context, schema string) error
 	return err
 }
 
-//return a signal
+// Conn returns a single connection by either opening a new connection
+// or returning an existing connection from the connection pool. Conn will
+// block until either a connection is returned or ctx is canceled.
+// Queries run on the same Conn will be run in the same database session.
+//
+// Every Conn must be returned to the database pool after use by
+// calling Conn.Close.
 func (h *replayEventHandler) getConn(ctx context.Context) (*sql.Conn, error) {
 	var err error
 	if h.pool == nil {
@@ -449,8 +553,8 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	for rows.Next() {
 		h.ReadRowValues(rows)
 	}
-	h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
 	defer rows.Close()
+	h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
 	return nil
 }
 
@@ -474,6 +578,7 @@ func (h *replayEventHandler) stmtPrepare(ctx context.Context, id uint64, query s
 		return errors.Trace(err)
 	}
 	h.stmts[id] = stmt
+	h.log.Debug(fmt.Sprintf("%v id is %v", query, id))
 	return nil
 }
 
@@ -512,8 +617,8 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 	for rows.Next() {
 		h.ReadRowValues(rows)
 	}
-	h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
 	defer rows.Close()
+	h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
 	return nil
 }
 
@@ -571,7 +676,7 @@ func (h *replayEventHandler) ReadRowValues(f *sql.Rows) {
 	h.Rr.ColValues = append(h.Rr.ColValues, z)
 }
 
-type textDumpHandler struct {
+/*type textDumpHandler struct {
 	conn stream.ConnID
 	buf  []byte
 	log  *zap.Logger
@@ -606,14 +711,14 @@ func (h *textDumpHandler) OnClose() {
 	} else {
 		os.Rename(path, filepath.Join(filepath.Dir(path), fmt.Sprintf("%d.%d.%s.tsv", h.fst, h.lst, h.conn.HashStr())))
 	}
-}
+}*/
 
 func NewTextCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "text",
 		Short: "Text format utilities",
 	}
-	cmd.AddCommand(NewTextDumpCommand())
+	//cmd.AddCommand(NewTextDumpCommand())
 	cmd.AddCommand(NewTextDumpReplayCommand())
 	return cmd
 }
