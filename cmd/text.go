@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 	"unsafe"
 
@@ -98,6 +99,24 @@ import (
 }
 */
 
+/*func string2int(str string) (int, error) {
+
+	b := []byte(str)
+	c := make([]byte, 0)
+	for _, d := range b {
+		if (d <= '9' && d >= '0') || d == '.' {
+			c = append(c, d)
+		}
+	}
+	fmt.Println(c)
+	return strconv.Atoi(string(c))
+}
+
+fun ParseRunTime(runTime string) (int,error){
+
+
+}*/
+
 //Replay sql from pcap files，and compare reslut from pcap file and
 //replay server
 func NewTextDumpReplayCommand() *cobra.Command {
@@ -105,6 +124,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		options   = stream.FactoryOptions{Synchronized: true}
 		dsn       string
 		filterStr string
+		runTime   string
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -116,6 +136,17 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			if filterStr != "select" && filterStr != "all" {
 				log.Error("filtering rules support only select or all")
 				return nil
+			}
+			ts := time.Now()
+			var ticker *time.Ticker
+			rt, err := strconv.Atoi(runTime)
+			if err != nil {
+				log.Error("parse runTime error " + err.Error())
+				return nil
+			}
+			if rt > 0 {
+				ticker = time.NewTicker(3 * time.Second)
+
 			}
 			if len(dsn) == 0 {
 				log.Error("need to specify DSN for replay sql ")
@@ -156,6 +187,22 @@ func NewTextDumpReplayCommand() *cobra.Command {
 					}
 					tcp := layer.(*layers.TCP)
 					assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
+					if rt > 0 {
+						select {
+						case <-ticker.C:
+							if time.Since(ts).Seconds() > float64(rt*60) {
+								assembler.FlushAll()
+								if filterStr == "select" {
+									StaticPrintForSelect()
+								} else {
+									StaticPrintForExecTime()
+								}
+								return nil
+							}
+						default:
+							//
+						}
+					}
 				}
 				return nil
 			}
@@ -180,6 +227,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&filterStr, "filter", "f", "select", "replay filtering rules")
 	cmd.Flags().StringVarP(&dsn, "dsn", "d", "", "replay server dsn")
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
+	cmd.Flags().StringVarP(&runTime, "runtime", "t", "0", "replay server run time")
 	return cmd
 }
 
