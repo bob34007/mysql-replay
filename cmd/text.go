@@ -232,6 +232,7 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 			h.Rr.ErrNO = mysqlError.Number
 			h.Rr.ErrDesc = mysqlError.Message
 		} else {
+			fmt.Println(err.Error(), ok)
 			h.Rr.ErrNO = 20000
 			h.Rr.ErrDesc = "exec sql fail and coverted to mysql errorstruct err"
 		}
@@ -502,7 +503,7 @@ func (h *replayEventHandler) getConn(ctx context.Context) (*sql.Conn, error) {
 	if h.conn == nil {
 		h.conn, err = h.pool.Conn(ctx)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, err
 		}
 		stats.Add(stats.Connections, 1)
 	}
@@ -548,7 +549,7 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	if err != nil {
 		h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
 		stats.Add(stats.FailedQueries, 1)
-		return errors.Trace(err)
+		return err
 	}
 	for rows.Next() {
 		h.ReadRowValues(rows)
@@ -575,7 +576,7 @@ func (h *replayEventHandler) stmtPrepare(ctx context.Context, id uint64, query s
 	stmt.handle, err = conn.PrepareContext(ctx, stmt.query)
 	if err != nil {
 		stats.Add(stats.FailedStmtPrepares, 1)
-		return errors.Trace(err)
+		return err
 	}
 	h.stmts[id] = stmt
 	h.log.Debug(fmt.Sprintf("%v id is %v", query, id))
@@ -610,10 +611,9 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 	if err != nil {
 		h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
 		stats.Add(stats.FailedStmtExecutes, 1)
-		return errors.Trace(err)
+		return err
 	}
 	h.Rr.ColNames, _ = rows.Columns()
-	//hr.Rr.ColTypes, _ = rows.ColumnTypes()
 	for rows.Next() {
 		h.ReadRowValues(rows)
 	}
@@ -649,7 +649,7 @@ func (h *replayEventHandler) getStmt(ctx context.Context, id uint64) (*sql.Stmt,
 	}
 	stmt.handle, err = conn.PrepareContext(ctx, stmt.query)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, err
 	}
 	h.stmts[id] = stmt
 	return stmt.handle, nil
