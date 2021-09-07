@@ -24,6 +24,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var ERRORTIMEOUT = errors.New("replay runtime out")
+
 //dump sql event to files from pcap files
 /*func NewTextDumpCommand() *cobra.Command {
 	var (
@@ -130,6 +132,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		Use:   "replay",
 		Short: "Replay pcap files",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var err error
 			if len(args) == 0 {
 				return cmd.Help()
 			}
@@ -139,7 +142,8 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			}
 			ts := time.Now()
 			var ticker *time.Ticker
-			rt, err := strconv.Atoi(runTime)
+			var rt int
+			rt, err = strconv.Atoi(runTime)
 			if err != nil {
 				log.Error("parse runTime error " + err.Error())
 				return nil
@@ -152,7 +156,8 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				log.Error("need to specify DSN for replay sql ")
 				return nil
 			}
-			MySQLConfig, err := mysql.ParseDSN(dsn)
+			var MySQLConfig *mysql.Config
+			MySQLConfig, err = mysql.ParseDSN(dsn)
 			if err != nil {
 				log.Error("fail to parse DSN to MySQLConfig ,", zap.Error(err))
 				return nil
@@ -174,7 +179,8 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			assembler := reassembly.NewAssembler(pool)
 
 			handle := func(name string) error {
-				f, err := pcap.OpenOffline(name)
+				var f *pcap.Handle
+				f, err = pcap.OpenOffline(name)
 				if err != nil {
 					return errors.Annotate(err, "open "+name)
 				}
@@ -191,13 +197,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 						select {
 						case <-ticker.C:
 							if time.Since(ts).Seconds() > float64(rt*60) {
-								assembler.FlushAll()
-								if filterStr == "select" {
-									StaticPrintForSelect()
-								} else {
-									StaticPrintForExecTime()
-								}
-								return nil
+								return ERRORTIMEOUT
 							}
 						default:
 							//
@@ -209,12 +209,15 @@ func NewTextDumpReplayCommand() *cobra.Command {
 
 			for _, in := range args {
 				zap.L().Info("processing " + in)
-				err := handle(in)
-				if err != nil {
+				err = handle(in)
+				if err != nil && err != ERRORTIMEOUT {
 					return err
+				} else if err == ERRORTIMEOUT {
+					break
 				}
 				assembler.FlushCloseOlderThan(factory.LastStreamTime().Add(-3 * time.Minute))
 			}
+
 			assembler.FlushAll()
 			if filterStr == "select" {
 				StaticPrintForSelect()
