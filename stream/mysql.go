@@ -21,6 +21,7 @@ var (
 	ExecSqlNum        uint64
 	ExecSuccNum       uint64
 	ExecFailNum       uint64
+	ExecErrNoNotEqual uint64
 	ExecTimeNotEqual  uint64
 	RowCountNotequal  uint64
 	RowDetailNotEqual uint64
@@ -39,6 +40,7 @@ func init() {
 	ExecSuccNum = 0
 	ExecFailNum = 0
 	ExecTimeNotEqual = 0
+	ExecErrNoNotEqual = 0
 	RowCountNotequal = 0
 	RowDetailNotEqual = 0
 	PrExecTimeCount = 0
@@ -49,6 +51,7 @@ func init() {
 	RrExecRowCount = 0
 	RrExecSuccCount = 0
 	RrExecFailCount = 0
+
 }
 
 const (
@@ -174,6 +177,7 @@ type MySQLFSM struct {
 	execSqlNum        uint64
 	execSuccNum       uint64
 	execFailNum       uint64
+	execErrNoNotEqual uint64
 	execTimeNotEqual  uint64
 	rowCountNotequal  uint64
 	rowDetailNotEqual uint64
@@ -1515,6 +1519,7 @@ func (fsm *MySQLFSM) AddStatis() {
 	ExecTimeNotEqual += fsm.execTimeNotEqual
 	RowCountNotequal += fsm.rowCountNotequal
 	RowDetailNotEqual += fsm.rowDetailNotEqual
+	ExecErrNoNotEqual += fsm.execErrNoNotEqual
 
 	fsm.prRowNumCount = 0
 	fsm.prExecTimeCount = 0
@@ -1527,6 +1532,7 @@ func (fsm *MySQLFSM) AddStatis() {
 	fsm.prExecSuccCount = 0
 	fsm.rrExecFailCount = 0
 	fsm.rrExecSuccCount = 0
+	fsm.execErrNoNotEqual = 0
 	fsm.execTimeNotEqual = 0
 	fsm.rowCountNotequal = 0
 	fsm.rowDetailNotEqual = 0
@@ -1579,6 +1585,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	if rr.ErrNO != pr.errNo {
 		res.ErrCode = 1
 		res.ErrDesc = fmt.Sprintf("%v-%v", pr.errNo, rr.ErrNO)
+		fsm.execErrNoNotEqual++
 		fsm.execFailNum++
 		return res
 	}
@@ -1698,6 +1705,7 @@ func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 			rr.ErrNO != 1025 && rr.ErrNO != 1213 {
 			res.ErrCode = 1
 			res.ErrDesc = fmt.Sprintf("%v-%v", pr.errNo, rr.ErrNO)
+			fsm.execErrNoNotEqual++
 			fsm.execFailNum++
 			return res
 		} else {

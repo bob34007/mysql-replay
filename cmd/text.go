@@ -340,6 +340,11 @@ func StaticPrintForExecTime() {
 	}
 	fmt.Println()
 	//fmt.Println()
+	fmt.Print("exec errno fail :", stream.ExecErrNoNotEqual, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.ExecErrNoNotEqual*100/stream.ExecSqlNum, "%")
+	}
+	fmt.Println()
 	fmt.Print("exec time fail :", stream.ExecTimeNotEqual, " ")
 	if stream.ExecSqlNum > 0 {
 		fmt.Print(stream.ExecTimeNotEqual*100/stream.ExecSqlNum, "%")
@@ -380,6 +385,11 @@ func StaticPrintForSelect() {
 		fmt.Print(stream.ExecFailNum*100/stream.ExecSqlNum, "%")
 	}
 	fmt.Println()
+	fmt.Println()
+	fmt.Print("exec errno fail :", stream.ExecErrNoNotEqual, " ")
+	if stream.ExecSqlNum > 0 {
+		fmt.Print(stream.ExecErrNoNotEqual*100/stream.ExecSqlNum, "%")
+	}
 	fmt.Println()
 	fmt.Print("exec time fail :", stream.ExecTimeNotEqual, " ")
 	if stream.ExecSqlNum > 0 {
