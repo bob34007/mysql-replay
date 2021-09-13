@@ -1592,8 +1592,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 
 	//compare exec time
 
-	if (rrSqlExecTime > prSqlExecTime+prSqlExecTime) &&
-		math.Abs((float64)(prSqlExecTime-rrSqlExecTime)) > 150 {
+	if rrSqlExecTime > (prSqlExecTime + prSqlExecTime) {
 		res.ErrCode = 2
 		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
 		fsm.execFailNum++
@@ -1715,8 +1714,7 @@ func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 
 	//compare exec time
 
-	if (rrSqlExecTime > prSqlExecTime+prSqlExecTime) &&
-		math.Abs((float64)(prSqlExecTime-rrSqlExecTime)) > 150 {
+	if rrSqlExecTime > (prSqlExecTime + prSqlExecTime) {
 		res.ErrCode = 2
 		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
 		fsm.execFailNum++
