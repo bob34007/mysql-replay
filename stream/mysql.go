@@ -66,7 +66,9 @@ const (
 	StateHandshake0
 	StateHandshake1
 	StateComQuery1
+	StateComQuery2
 	StateComStmtExecute1
+	StateComStmtExecute2
 )
 
 func StateName(state int) string {
@@ -77,8 +79,16 @@ func StateName(state int) string {
 		return "Unknown"
 	case StateComQuery:
 		return "ComQuery"
+	case StateComQuery1:
+		return "ReadingComQueryRes"
+	case StateComQuery2:
+		return "ReadComQueryResEnd"
 	case StateComStmtExecute:
 		return "ComStmtExecute"
+	case StateComStmtExecute1:
+		return "ReadingComStmtExecuteRes"
+	case StateComStmtExecute2:
+		return "ReadingComStmtExecuteEnd"
 	case StateComStmtClose:
 		return "ComStmtClose"
 	case StateComStmtPrepare0:
@@ -232,8 +242,6 @@ func (fsm *MySQLFSM) InitValue() {
 	pr.ifReadColEndEofPacket = false
 	pr.ifReadResEnd = false
 	fsm.packets = fsm.packets[:0]
-	//rr := new(ReplayRes)
-	//fsm.Rr = rr
 }
 
 func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
@@ -244,9 +252,11 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 	//Message sequence numbers may reuse
 	//serial number 0 for large result sets
 	if pkt.Seq == 0 &&
-		fsm.State() != StateComQuery &&
-		fsm.State() != StateComStmtExecute {
+		fsm.State() != StateComQuery1 &&
+		fsm.State() != StateComStmtExecute1 {
 		fsm.InitValue()
+		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+		fsm.log.Debug("sql begin time is :" + fmt.Sprintf("%v", fsm.pr.sqlBeginTime))
 		fsm.packets = append(fsm.packets, pkt)
 	} else if fsm.nextSeq() == pkt.Seq {
 		fsm.packets = append(fsm.packets, pkt)
@@ -264,7 +274,10 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		fsm.handleComStmtPrepareResponse()
 	} else if fsm.state == StateHandshake0 {
 		fsm.handleHandshakeResponse()
-	} else if fsm.state == StateComQuery {
+	} else if fsm.state == StateComQuery || fsm.state == StateComQuery1 {
+		if fsm.state == StateComQuery {
+			fsm.setStatusWithNoChange(StateComQuery1)
+		}
 		err := fsm.handleReadSQLResult()
 		if err != nil {
 			fsm.log.Warn("read packet fail ," + err.Error())
@@ -275,13 +288,16 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			}
 		}
 		if fsm.pr.ifReadResEnd {
-			fsm.set(StateComQuery1)
+			fsm.set(StateComQuery2)
 			fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 			fsm.log.Debug("the query exec time is :" +
 				fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 				"ms")
 		}
-	} else if fsm.state == StateComStmtExecute {
+	} else if fsm.state == StateComStmtExecute || fsm.state == StateComStmtExecute1 {
+		if fsm.state == StateComStmtExecute {
+			fsm.setStatusWithNoChange(StateComStmtExecute1)
+		}
 		err := fsm.handleReadPrepareExecResult()
 		if err != nil {
 			fsm.log.Warn("read packet fail ," + err.Error())
@@ -292,7 +308,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			}
 		}
 		if fsm.pr.ifReadResEnd {
-			fsm.set(StateComStmtExecute1)
+			fsm.set(StateComStmtExecute2)
 			fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 			fsm.log.Debug("sql end time is :" + fmt.Sprintf("%v", fsm.pr.sqlEndTime))
 			fsm.log.Debug("the query exec time is :" +
@@ -301,11 +317,11 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		}
 	}
 
-	if (fsm.state == StateComQuery || fsm.state == StateComStmtExecute) &&
+	/*if (fsm.state == StateComQuery || fsm.state == StateComStmtExecute) &&
 		fsm.pr.sqlBeginTime == 0 {
 		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
 		fsm.log.Debug("sql begin time is :" + fmt.Sprintf("%v", fsm.pr.sqlBeginTime))
-	}
+	}*/
 }
 
 func (fsm *MySQLFSM) Packets() []MySQLPacket {
@@ -345,6 +361,16 @@ func (fsm *MySQLFSM) load(k int) bool {
 		i = j + 1
 	}
 	return false
+}
+
+//Only change status ,do not modify fsm.changed
+//Used in comQuery and comstmTexecut state
+//for read result
+func (fsm *MySQLFSM) setStatusWithNoChange(to int, msg ...string) {
+	from := fsm.state
+	fsm.state = to
+	logstr := fmt.Sprintf("fsm.stsatus changed  %s -> %s ", StateName(from), StateName(to))
+	fsm.log.Info(logstr)
 }
 
 func (fsm *MySQLFSM) set(to int, msg ...string) {
@@ -1592,7 +1618,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 
 	//compare exec time
 
-	if rrSqlExecTime > (prSqlExecTime + prSqlExecTime) {
+	if rrSqlExecTime > (5 * prSqlExecTime) {
 		res.ErrCode = 2
 		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
 		fsm.execFailNum++
@@ -1714,7 +1740,7 @@ func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 
 	//compare exec time
 
-	if rrSqlExecTime > (prSqlExecTime + prSqlExecTime) {
+	if rrSqlExecTime > (5 * prSqlExecTime) {
 		res.ErrCode = 2
 		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
 		fsm.execFailNum++

@@ -385,11 +385,11 @@ func (h *eventHandler) OnPacket(pkt MySQLPacket) {
 	e := MySQLEvent{Time: pkt.Time.UnixNano() / int64(time.Millisecond)}
 	e.Fsm = h.fsm
 	switch h.fsm.State() {
-	case StateComQuery1:
+	case StateComQuery2:
 		e.Type = EventQuery
 		e.Query = h.fsm.Query()
 
-	case StateComStmtExecute1:
+	case StateComStmtExecute2:
 		stmt := h.fsm.Stmt()
 		e.Type = EventStmtExecute
 		e.StmtID = uint64(stmt.ID)
