@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -382,7 +381,8 @@ func (h *eventHandler) OnPacket(pkt MySQLPacket) {
 	if !h.fsm.Ready() || !h.fsm.Changed() {
 		return
 	}
-	e := MySQLEvent{Time: pkt.Time.UnixNano() / int64(time.Millisecond)}
+	//e := MySQLEvent{Time: pkt.Time.UnixNano() / int64(time.Millisecond)}
+	e := MySQLEvent{Time: pkt.Time.UnixNano()}
 	e.Fsm = h.fsm
 	switch h.fsm.State() {
 	case StateComQuery2:

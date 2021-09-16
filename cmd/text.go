@@ -13,6 +13,7 @@ import (
 
 	"github.com/bobguo/mysql-replay/stats"
 	"github.com/bobguo/mysql-replay/stream"
+	"github.com/bobguo/mysql-replay/tso"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -101,24 +102,6 @@ var ERRORTIMEOUT = errors.New("replay runtime out")
 }
 */
 
-/*func string2int(str string) (int, error) {
-
-	b := []byte(str)
-	c := make([]byte, 0)
-	for _, d := range b {
-		if (d <= '9' && d >= '0') || d == '.' {
-			c = append(c, d)
-		}
-	}
-	fmt.Println(c)
-	return strconv.Atoi(string(c))
-}
-
-fun ParseRunTime(runTime string) (int,error){
-
-
-}*/
-
 //Replay sql from pcap files，and compare reslut from pcap file and
 //replay server
 func NewTextDumpReplayCommand() *cobra.Command {
@@ -133,6 +116,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		Short: "Replay pcap files",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
+			log.Info("process begin run at " + time.Now().String())
 			if len(args) == 0 {
 				return cmd.Help()
 			}
@@ -224,6 +208,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			} else {
 				StaticPrintForExecTime()
 			}
+			log.Info("process end run at " + time.Now().String())
 			return nil
 		},
 	}
@@ -242,20 +227,25 @@ type statement struct {
 
 //Used for replay  SQL
 type replayEventHandler struct {
-	pconn               stream.ConnID
-	dsn                 string
-	fsm                 *stream.MySQLFSM
-	log                 *zap.Logger
-	MySQLConfig         *mysql.Config
-	schema              string
-	pool                *sql.DB
-	conn                *sql.Conn
-	stmts               map[uint64]statement
-	ctx                 context.Context
-	filterStr           string
-	needCompareRes      bool
-	needCompareExecTime bool
-	Rr                  *stream.ReplayRes
+	pconn                       stream.ConnID
+	dsn                         string
+	fsm                         *stream.MySQLFSM
+	log                         *zap.Logger
+	MySQLConfig                 *mysql.Config
+	schema                      string
+	pool                        *sql.DB
+	conn                        *sql.Conn
+	stmts                       map[uint64]statement
+	ctx                         context.Context
+	filterStr                   string
+	needCompareRes              bool
+	needCompareExecTime         bool
+	rrLastGetCheckPointTime     time.Time
+	rrCheckPoint                time.Time
+	rrGetCheckPointTimeInterval int64
+	rrContinueRun               bool
+	rrNeedReplay                bool
+	Rr                          *stream.ReplayRes
 }
 
 //init values for replay new sql
@@ -270,13 +260,66 @@ func (h *replayEventHandler) rrInit() {
 	rr.SqlStatment = ""
 	rr.SqlBeginTime = 0
 	rr.SqlEndTime = 0
+
+	//get checkpoint from tidb interval :1s
+	//TODO: input as parameter
+	h.rrGetCheckPointTimeInterval = 5
+
 }
 
+//Check whether the SQL needs to be run
+func (h *replayEventHandler) checkRunOrWait(e stream.MySQLEvent) {
+
+	h.rrNeedReplay = true
+	if !h.rrContinueRun {
+		if time.Since(h.rrLastGetCheckPointTime).Seconds() >
+			float64(h.rrGetCheckPointTimeInterval) {
+			tso := new(tso.TSO)
+			conn, err := h.getConn(h.ctx)
+			if err != nil {
+				h.log.Error("get conn fail ," + err.Error())
+				//conn db fail , set rrContinueRun true ,process continue run
+				h.rrContinueRun = true
+				return
+			}
+			ullTs, err := tso.GetTSOFromDB(h.ctx, conn, h.log)
+			if err != nil {
+				h.log.Error("get tso fail ," + err.Error())
+				h.rrContinueRun = true
+				return
+			}
+			tso.ParseTS(ullTs)
+			h.rrCheckPoint = tso.GetPhysicalTime()
+			h.rrLastGetCheckPointTime = time.Now()
+		}
+
+		if h.rrCheckPoint.UnixNano()+ //h.rrGetCheckPointTimeInterval < e.Time {
+			int64(float64(h.rrGetCheckPointTimeInterval)/2*1000*1000000) < e.Time {
+			h.rrContinueRun = true
+			return
+		} else {
+			/*logstr := fmt.Sprintf("%d", e.Time-h.rrCheckPoint.UnixNano())
+			h.log.Info("replay run fastet than binlog ,wait " + logstr + "Nanosecond")
+			time.Sleep(time.Duration(e.Time-h.rrCheckPoint.UnixNano()-7*1000*1000000) *
+				time.Nanosecond)
+			h.rrContinueRun = true
+			return*/
+			h.rrContinueRun = true
+			h.rrNeedReplay = false
+			return
+		}
+	}
+
+}
+
+//Process SQL events. Note that unlike the events in binlog,
+//this SQL event is raw and may involve multiple rows
 func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 	if h.fsm == nil {
 		h.fsm = e.Fsm
 	}
 	h.rrInit()
+
 	err := h.ApplyEvent(h.ctx, e)
 	if err != nil {
 		if mysqlError, ok := err.(*mysql.MySQLError); ok {
@@ -287,6 +330,10 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 			h.Rr.ErrNO = 20000
 			h.Rr.ErrDesc = "exec sql fail and coverted to mysql errorstruct err"
 		}
+	}
+
+	if !h.rrNeedReplay {
+		return
 	}
 
 	defer func() {
@@ -321,6 +368,7 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 		}
 		return
 	}
+
 }
 
 //print static message
@@ -354,18 +402,38 @@ func StaticPrintForExecTime() {
 	fmt.Println("-------from packet -------------")
 	fmt.Println("exec succ sql count :", stream.PrExecSuccCount)
 	fmt.Println("exec fail sql count :", stream.PrExecFailCount)
-	fmt.Println("exec time :", stream.PrExecTimeCount)
+	fmt.Println("exec time :", stream.PrExecTimeCount/uint64(time.Millisecond))
 	if stream.ExecSqlNum > 0 {
-		fmt.Println("exec time avg :", stream.PrExecTimeCount/stream.ExecSqlNum)
+		fmt.Printf("avg exec  time: %.2f \n",
+			float64(stream.PrExecTimeCount)/float64(stream.ExecSqlNum)/float64(time.Millisecond))
 	}
+	fmt.Println("max exec time: ", stream.PrMaxExecTime/uint64(time.Millisecond))
+	fmt.Println("min exec time: ", stream.PrMinExecTime/uint64(time.Millisecond))
+	fmt.Println("exec in 10ms: ", stream.PrExecTimeIn10ms)
+	fmt.Println("exec in 20ms: ", stream.PrExecTimeIn20ms)
+	fmt.Println("exec in 30ms: ", stream.PrExecTimeIn30ms)
+	fmt.Println("exec in 40ms: ", stream.PrExecTimeIn40ms)
+	fmt.Println("exec in 50ms: ", stream.PrExecTimeIn50ms)
+	fmt.Println("exec in 100ms: ", stream.PrExecTimeIn100ms)
+	fmt.Println("exec out 100ms: ", stream.PrExecTimeOut100ms)
 	fmt.Println()
 	fmt.Println("-------from replay server -------------")
 	fmt.Println("exec succ sql count :", stream.RrExecSuccCount)
 	fmt.Println("exec fail sql count :", stream.RrExecFailCount)
-	fmt.Println("exec time  :", stream.RrExecTimeCount)
+	fmt.Println("exec time  :", stream.RrExecTimeCount/uint64(time.Millisecond))
 	if stream.ExecSqlNum > 0 {
-		fmt.Println("exec time avg :", stream.RrExecTimeCount/stream.ExecSqlNum)
+		fmt.Printf("avg exec  time: %.2f \n",
+			float64(stream.RrExecTimeCount)/float64(stream.ExecSqlNum)/float64(time.Millisecond))
 	}
+	fmt.Println("max exec time: ", stream.RrMaxExecTime/uint64(time.Millisecond))
+	fmt.Println("min exec time: ", stream.RrMinExecTime/uint64(time.Millisecond))
+	fmt.Println("exec in 10ms: ", stream.RrExecTimeIn10ms)
+	fmt.Println("exec in 20ms: ", stream.RrExecTimeIn20ms)
+	fmt.Println("exec in 30ms: ", stream.RrExecTimeIn30ms)
+	fmt.Println("exec in 40ms: ", stream.RrExecTimeIn40ms)
+	fmt.Println("exec in 50ms: ", stream.RrExecTimeIn50ms)
+	fmt.Println("exec in 100ms: ", stream.RrExecTimeIn100ms)
+	fmt.Println("exec out 100ms: ", stream.RrExecTimeOut100ms)
 	fmt.Println("-------compare result -------------")
 }
 
@@ -384,7 +452,6 @@ func StaticPrintForSelect() {
 	if stream.ExecSqlNum > 0 {
 		fmt.Print(stream.ExecFailNum*100/stream.ExecSqlNum, "%")
 	}
-	fmt.Println()
 	fmt.Println()
 	fmt.Print("exec errno fail :", stream.ExecErrNoNotEqual, " ")
 	if stream.ExecSqlNum > 0 {
@@ -406,24 +473,46 @@ func StaticPrintForSelect() {
 		fmt.Print(stream.RowDetailNotEqual*100/stream.ExecSqlNum, "%")
 	}
 	fmt.Println()
-	fmt.Println()
 	fmt.Println("-------from packet -------------")
 	fmt.Println("exec succ sql count :", stream.PrExecSuccCount)
 	fmt.Println("exec fail sql count :", stream.PrExecFailCount)
-	fmt.Println("exec time :", stream.PrExecTimeCount)
+	fmt.Print("exec time :",
+		stream.PrExecTimeCount/uint64(time.Millisecond), "  ")
 	fmt.Println("reslut rows :", stream.PrExecRowCount)
 	if stream.ExecSqlNum > 0 {
-		fmt.Println("one sql exec  time:", stream.PrExecTimeCount/stream.ExecSqlNum)
+		fmt.Printf("avg exec  time: %.2f \n",
+			float64(stream.PrExecTimeCount)/float64(stream.ExecSqlNum)/float64(time.Millisecond))
 	}
-	fmt.Println()
+	fmt.Print("max exec time: ",
+		stream.PrMaxExecTime/uint64(time.Millisecond), "  ")
+	fmt.Println("min exec time: ", stream.PrMinExecTime/uint64(time.Millisecond))
+	fmt.Print("exec in 10ms: ", stream.PrExecTimeIn10ms, "  ")
+	fmt.Println("exec in 20ms: ", stream.PrExecTimeIn20ms)
+	fmt.Print("exec in 30ms: ", stream.PrExecTimeIn30ms, "  ")
+	fmt.Println("exec in 40ms: ", stream.PrExecTimeIn40ms)
+	fmt.Print("exec in 50ms: ", stream.PrExecTimeIn50ms, "  ")
+	fmt.Println("exec in 100ms: ", stream.PrExecTimeIn100ms)
+	fmt.Println("exec out 100ms: ", stream.PrExecTimeOut100ms)
 	fmt.Println("-------from replay server -------------")
 	fmt.Println("exec succ sql count :", stream.RrExecSuccCount)
 	fmt.Println("exec fail sql count :", stream.RrExecFailCount)
-	fmt.Println("exec time  :", stream.RrExecTimeCount)
+	fmt.Print("exec time  :",
+		stream.RrExecTimeCount/uint64(time.Millisecond), "  ")
 	fmt.Println("reslut rows :", stream.RrExecRowCount)
 	if stream.ExecSqlNum > 0 {
-		fmt.Println("one sql exec  time:", stream.RrExecTimeCount/stream.ExecSqlNum)
+		fmt.Printf("avg exec  time: %.2f \n",
+			float64(stream.RrExecTimeCount)/float64(stream.ExecSqlNum)/float64(time.Millisecond))
 	}
+	fmt.Println()
+	fmt.Print("max exec time: ", stream.RrMaxExecTime/uint64(time.Millisecond), "  ")
+	fmt.Println("min exec time: ", stream.RrMinExecTime/uint64(time.Millisecond))
+	fmt.Print("exec in 10ms: ", stream.RrExecTimeIn10ms, "  ")
+	fmt.Println("exec in 20ms: ", stream.RrExecTimeIn20ms)
+	fmt.Print("exec in 30ms: ", stream.RrExecTimeIn30ms, "  ")
+	fmt.Println("exec in 40ms: ", stream.RrExecTimeIn40ms)
+	fmt.Print("exec in 50ms: ", stream.RrExecTimeIn50ms, "  ")
+	fmt.Println("exec in 100ms: ", stream.RrExecTimeIn100ms)
+	fmt.Println("exec out 100ms: ", stream.RrExecTimeOut100ms)
 	fmt.Println("-------compare result -------------")
 }
 
@@ -435,7 +524,7 @@ func (h *replayEventHandler) OnClose() {
 	h.quit(false)
 }
 
-//apply mysql event to replay server
+//apply mysql event on replay server
 func (h *replayEventHandler) ApplyEvent(ctx context.Context, e stream.MySQLEvent) error {
 	var err error
 	h.needCompareRes = false
@@ -446,6 +535,13 @@ LOOP:
 		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
 			if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
 				h.Rr.ColValues = make([][]driver.Value, 0)
+				if !h.rrContinueRun {
+					h.checkRunOrWait(e)
+					h.rrContinueRun = false
+					if !h.rrNeedReplay {
+						return nil
+					}
+				}
 				err = h.execute(ctx, e.Query)
 				h.needCompareRes = true
 			}
@@ -479,6 +575,13 @@ LOOP:
 			_, ok := h.stmts[e.StmtID]
 			if ok {
 				h.Rr.ColValues = make([][]driver.Value, 0)
+				if !h.rrContinueRun {
+					h.checkRunOrWait(e)
+					h.rrContinueRun = false
+				}
+				if !h.rrNeedReplay {
+					return nil
+				}
 				err = h.stmtExecute(ctx, e.StmtID, e.Params)
 				h.needCompareRes = true
 			}
@@ -531,6 +634,7 @@ func (h *replayEventHandler) open(schema string) (*sql.DB, error) {
 		cfg = cfg.Clone()
 		cfg.DBName = schema
 	}
+
 	return sql.Open("mysql", cfg.FormatDSN())
 }
 
@@ -603,12 +707,13 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	}
 	stats.Add(stats.Queries, 1)
 	stats.Add(stats.ConnRunning, 1)
-	h.Rr.SqlBeginTime = time.Now().UnixNano() / 1000000
+	h.Rr.SqlBeginTime = uint64(time.Now().UnixNano())
 	h.Rr.SqlStatment = query
 	rows, err := conn.QueryContext(ctx, query)
+	h.Rr.SqlEndTime = uint64(time.Now().UnixNano())
 	stats.Add(stats.ConnRunning, -1)
 	if err != nil {
-		h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
+		//h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
 		stats.Add(stats.FailedQueries, 1)
 		return err
 	}
@@ -616,7 +721,7 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 		h.ReadRowValues(rows)
 	}
 	defer rows.Close()
-	h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
+
 	return nil
 }
 
@@ -666,20 +771,21 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 	h.Rr.Values = params
 	stats.Add(stats.StmtExecutes, 1)
 	stats.Add(stats.ConnRunning, 1)
-	h.Rr.SqlBeginTime = time.Now().UnixNano() / 1000000
+	h.Rr.SqlBeginTime = uint64(time.Now().UnixNano())
 	rows, err := stmt.QueryContext(ctx, params...)
+	h.Rr.SqlEndTime = uint64(time.Now().UnixNano())
 	stats.Add(stats.ConnRunning, -1)
 	if err != nil {
-		h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
+		//h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
 		stats.Add(stats.FailedStmtExecutes, 1)
 		return err
 	}
-	h.Rr.ColNames, _ = rows.Columns()
+	//h.Rr.ColNames, _ = rows.Columns()
 	for rows.Next() {
 		h.ReadRowValues(rows)
 	}
 	defer rows.Close()
-	h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
+
 	return nil
 }
 

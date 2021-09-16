@@ -17,22 +17,40 @@ import (
 )
 
 var (
-	Sm                sync.Mutex
-	ExecSqlNum        uint64
-	ExecSuccNum       uint64
-	ExecFailNum       uint64
-	ExecErrNoNotEqual uint64
-	ExecTimeNotEqual  uint64
-	RowCountNotequal  uint64
-	RowDetailNotEqual uint64
-	PrExecTimeCount   uint64
-	PrExecRowCount    uint64
-	PrExecSuccCount   uint64
-	PrExecFailCount   uint64
-	RrExecTimeCount   uint64
-	RrExecRowCount    uint64
-	RrExecSuccCount   uint64
-	RrExecFailCount   uint64
+	Sm                 sync.Mutex
+	ExecSqlNum         uint64
+	ExecSuccNum        uint64
+	ExecFailNum        uint64
+	ExecErrNoNotEqual  uint64
+	ExecTimeNotEqual   uint64
+	RowCountNotequal   uint64
+	RowDetailNotEqual  uint64
+	PrExecRowCount     uint64
+	PrExecSuccCount    uint64
+	PrExecFailCount    uint64
+	PrExecTimeCount    uint64
+	PrMaxExecTime      uint64
+	PrMinExecTime      uint64
+	PrExecTimeIn10ms   uint64
+	PrExecTimeIn20ms   uint64
+	PrExecTimeIn30ms   uint64
+	PrExecTimeIn40ms   uint64
+	PrExecTimeIn50ms   uint64
+	PrExecTimeIn100ms  uint64
+	PrExecTimeOut100ms uint64
+	RrExecTimeCount    uint64
+	RrExecRowCount     uint64
+	RrExecSuccCount    uint64
+	RrExecFailCount    uint64
+	RrMaxExecTime      uint64
+	RrMinExecTime      uint64
+	RrExecTimeIn10ms   uint64
+	RrExecTimeIn20ms   uint64
+	RrExecTimeIn30ms   uint64
+	RrExecTimeIn40ms   uint64
+	RrExecTimeIn50ms   uint64
+	RrExecTimeIn100ms  uint64
+	RrExecTimeOut100ms uint64
 )
 
 func init() {
@@ -47,11 +65,29 @@ func init() {
 	PrExecRowCount = 0
 	PrExecSuccCount = 0
 	PrExecFailCount = 0
+	PrMaxExecTime = 0
+	PrMinExecTime = 10000000
 	RrExecTimeCount = 0
 	RrExecRowCount = 0
 	RrExecSuccCount = 0
 	RrExecFailCount = 0
+	RrMaxExecTime = 0
+	RrMinExecTime = 10000000
 
+	PrExecTimeIn10ms = 0
+	PrExecTimeIn20ms = 0
+	PrExecTimeIn30ms = 0
+	PrExecTimeIn40ms = 0
+	PrExecTimeIn50ms = 0
+	PrExecTimeIn100ms = 0
+	PrExecTimeOut100ms = 0
+	RrExecTimeIn10ms = 0
+	RrExecTimeIn20ms = 0
+	RrExecTimeIn30ms = 0
+	RrExecTimeIn40ms = 0
+	RrExecTimeIn50ms = 0
+	RrExecTimeIn100ms = 0
+	RrExecTimeOut100ms = 0
 }
 
 const (
@@ -133,8 +169,8 @@ type ReplayRes struct {
 	//InsertId     uint64
 	SqlStatment  string
 	Values       []interface{}
-	SqlBeginTime int64
-	SqlEndTime   int64
+	SqlBeginTime uint64
+	SqlEndTime   uint64
 	//	SqlExecTime  int64
 	ColumnNum int
 	ColNames  []string
@@ -151,8 +187,8 @@ type PacketRes struct {
 	status       statusFlag
 	parseTime    bool
 	packetnum    int
-	sqlBeginTime int64
-	sqlEndTime   int64
+	sqlBeginTime uint64
+	sqlEndTime   uint64
 	columnNum    int
 	bRows        *binaryRows
 	tRows        *textRows
@@ -184,21 +220,39 @@ type MySQLFSM struct {
 	count   int
 	pr      *PacketRes
 	//Rr          *ReplayRes
-	execSqlNum        uint64
-	execSuccNum       uint64
-	execFailNum       uint64
-	execErrNoNotEqual uint64
-	execTimeNotEqual  uint64
-	rowCountNotequal  uint64
-	rowDetailNotEqual uint64
-	prRowNumCount     uint64
-	prExecTimeCount   uint64
-	prExecSuccCount   uint64
-	prExecFailCount   uint64
-	rrRowNumCount     uint64
-	rrExecTimeCount   uint64
-	rrExecSuccCount   uint64
-	rrExecFailCount   uint64
+	execSqlNum         uint64
+	execSuccNum        uint64
+	execFailNum        uint64
+	execErrNoNotEqual  uint64
+	execTimeNotEqual   uint64
+	rowCountNotequal   uint64
+	rowDetailNotEqual  uint64
+	prRowNumCount      uint64
+	prExecTimeCount    uint64
+	prExecSuccCount    uint64
+	prExecFailCount    uint64
+	prMaxExecTime      uint64
+	prMinExecTime      uint64
+	prExecTimeIn10ms   uint64
+	prExecTimeIn20ms   uint64
+	prExecTimeIn30ms   uint64
+	prExecTimeIn40ms   uint64
+	prExecTimeIn50ms   uint64
+	prExecTimeIn100ms  uint64
+	prExecTimeOut100ms uint64
+	rrExecTimeIn10ms   uint64
+	rrExecTimeIn20ms   uint64
+	rrExecTimeIn30ms   uint64
+	rrExecTimeIn40ms   uint64
+	rrExecTimeIn50ms   uint64
+	rrExecTimeIn100ms  uint64
+	rrExecTimeOut100ms uint64
+	rrRowNumCount      uint64
+	rrExecTimeCount    uint64
+	rrExecSuccCount    uint64
+	rrExecFailCount    uint64
+	rrMaxExecTime      uint64
+	rrMinExecTime      uint64
 }
 
 func (fsm *MySQLFSM) State() int { return fsm.state }
@@ -255,7 +309,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		fsm.State() != StateComQuery1 &&
 		fsm.State() != StateComStmtExecute1 {
 		fsm.InitValue()
-		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+		fsm.pr.sqlBeginTime = uint64(pkt.Time.UnixNano())
 		fsm.log.Debug("sql begin time is :" + fmt.Sprintf("%v", fsm.pr.sqlBeginTime))
 		fsm.packets = append(fsm.packets, pkt)
 	} else if fsm.nextSeq() == pkt.Seq {
@@ -289,7 +343,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		}
 		if fsm.pr.ifReadResEnd {
 			fsm.set(StateComQuery2)
-			fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+			fsm.pr.sqlEndTime = uint64(pkt.Time.UnixNano())
 			fsm.log.Debug("the query exec time is :" +
 				fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 				"ms")
@@ -309,7 +363,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		}
 		if fsm.pr.ifReadResEnd {
 			fsm.set(StateComStmtExecute2)
-			fsm.pr.sqlEndTime = pkt.Time.UnixNano() / int64(time.Millisecond)
+			fsm.pr.sqlEndTime = uint64(pkt.Time.UnixNano())
 			fsm.log.Debug("sql end time is :" + fmt.Sprintf("%v", fsm.pr.sqlEndTime))
 			fsm.log.Debug("the query exec time is :" +
 				fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
@@ -370,7 +424,7 @@ func (fsm *MySQLFSM) setStatusWithNoChange(to int, msg ...string) {
 	from := fsm.state
 	fsm.state = to
 	logstr := fmt.Sprintf("fsm.stsatus changed  %s -> %s ", StateName(from), StateName(to))
-	fsm.log.Info(logstr)
+	fsm.log.Debug(logstr)
 }
 
 func (fsm *MySQLFSM) set(to int, msg ...string) {
@@ -1546,6 +1600,48 @@ func (fsm *MySQLFSM) AddStatis() {
 	RowCountNotequal += fsm.rowCountNotequal
 	RowDetailNotEqual += fsm.rowDetailNotEqual
 	ExecErrNoNotEqual += fsm.execErrNoNotEqual
+	if PrMaxExecTime < fsm.prMaxExecTime {
+		PrMaxExecTime = fsm.prMaxExecTime
+	}
+	if PrMinExecTime > fsm.prMinExecTime {
+		PrMinExecTime = fsm.prMinExecTime
+	}
+	if RrMaxExecTime < fsm.rrMaxExecTime {
+		RrMaxExecTime = fsm.rrMaxExecTime
+	}
+	if RrMinExecTime > fsm.rrMinExecTime {
+		RrMinExecTime = fsm.rrMinExecTime
+	}
+
+	PrExecTimeIn10ms += fsm.prExecTimeIn10ms
+	PrExecTimeIn20ms += fsm.prExecTimeIn20ms
+	PrExecTimeIn30ms += fsm.prExecTimeIn30ms
+	PrExecTimeIn40ms += fsm.prExecTimeIn40ms
+	PrExecTimeIn50ms += fsm.prExecTimeIn50ms
+	PrExecTimeIn100ms += fsm.prExecTimeIn100ms
+	PrExecTimeOut100ms += fsm.prExecTimeOut100ms
+	RrExecTimeIn10ms += fsm.rrExecTimeIn10ms
+	RrExecTimeIn20ms += fsm.rrExecTimeIn20ms
+	RrExecTimeIn30ms += fsm.rrExecTimeIn30ms
+	RrExecTimeIn40ms += fsm.rrExecTimeIn40ms
+	RrExecTimeIn50ms += fsm.rrExecTimeIn50ms
+	RrExecTimeIn100ms += fsm.rrExecTimeIn100ms
+	RrExecTimeOut100ms += fsm.rrExecTimeOut100ms
+
+	fsm.prExecTimeIn10ms = 0
+	fsm.prExecTimeIn20ms = 0
+	fsm.prExecTimeIn30ms = 0
+	fsm.prExecTimeIn40ms = 0
+	fsm.prExecTimeIn50ms = 0
+	fsm.prExecTimeIn100ms = 0
+	fsm.prExecTimeOut100ms = 0
+	fsm.rrExecTimeIn10ms = 0
+	fsm.rrExecTimeIn20ms = 0
+	fsm.rrExecTimeIn30ms = 0
+	fsm.rrExecTimeIn40ms = 0
+	fsm.rrExecTimeIn50ms = 0
+	fsm.rrExecTimeIn100ms = 0
+	fsm.rrExecTimeOut100ms = 0
 
 	fsm.prRowNumCount = 0
 	fsm.prExecTimeCount = 0
@@ -1562,6 +1658,62 @@ func (fsm *MySQLFSM) AddStatis() {
 	fsm.execTimeNotEqual = 0
 	fsm.rowCountNotequal = 0
 	fsm.rowDetailNotEqual = 0
+	fsm.prMaxExecTime = 0
+	fsm.prMinExecTime = 10000000
+	fsm.rrMaxExecTime = 0
+	fsm.rrMinExecTime = 10000000
+}
+
+//type 0 from packet
+//type 1 from replay server
+func (fsm *MySQLFSM) setBucketNum(execTime uint64, serverType int8) {
+	execTimeMS := execTime / uint64(time.Millisecond)
+	switch true {
+	case execTimeMS < 10:
+		if serverType == 0 {
+			fsm.prExecTimeIn10ms++
+		} else {
+			fsm.rrExecTimeIn10ms++
+		}
+	case execTimeMS >= 10 && execTimeMS < 20:
+		if serverType == 0 {
+			fsm.prExecTimeIn20ms++
+		} else {
+			fsm.rrExecTimeIn20ms++
+		}
+	case execTimeMS >= 20 && execTimeMS < 30:
+		if serverType == 0 {
+			fsm.prExecTimeIn30ms++
+		} else {
+			fsm.rrExecTimeIn30ms++
+		}
+	case execTimeMS >= 30 && execTimeMS < 40:
+		if serverType == 0 {
+			fsm.prExecTimeIn40ms++
+		} else {
+			fsm.rrExecTimeIn40ms++
+		}
+	case execTimeMS >= 40 && execTimeMS < 50:
+		if serverType == 0 {
+			fsm.prExecTimeIn50ms++
+		} else {
+			fsm.rrExecTimeIn50ms++
+		}
+	case execTimeMS >= 50 && execTimeMS < 100:
+		if serverType == 0 {
+			fsm.prExecTimeIn100ms++
+		} else {
+			fsm.rrExecTimeIn100ms++
+		}
+	default:
+		if serverType == 0 {
+			fsm.prExecTimeOut100ms++
+		} else {
+			fsm.rrExecTimeOut100ms++
+		}
+
+	}
+
 }
 
 //compare result from packet and result from tidb server
@@ -1576,11 +1728,37 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	res.Sql = rr.SqlStatment
 	res.Values = rr.Values
 	fsm.execSqlNum++
-	prSqlExecTime := pr.sqlEndTime - pr.sqlBeginTime
-
+	var prSqlExecTime uint64
+	if pr.sqlBeginTime < pr.sqlEndTime {
+		prSqlExecTime = pr.sqlEndTime - pr.sqlBeginTime
+	} else {
+		prSqlExecTime = 0
+	}
 	fsm.prExecTimeCount += uint64(prSqlExecTime)
-	rrSqlExecTime := rr.SqlEndTime - rr.SqlBeginTime
+
+	var rrSqlExecTime uint64
+	if rr.SqlBeginTime < rr.SqlEndTime {
+		rrSqlExecTime = rr.SqlEndTime - rr.SqlBeginTime
+	} else {
+		rrSqlExecTime = 0
+	}
 	fsm.rrExecTimeCount += uint64(rrSqlExecTime)
+	fsm.prExecTimeCount += uint64(prSqlExecTime)
+	fsm.setBucketNum(rrSqlExecTime, 1)
+	fsm.setBucketNum(prSqlExecTime, 0)
+	if fsm.prMaxExecTime < uint64(prSqlExecTime) {
+		fsm.prMaxExecTime = uint64(prSqlExecTime)
+	}
+	if fsm.prMinExecTime > uint64(prSqlExecTime) {
+		fsm.prMinExecTime = uint64(prSqlExecTime)
+	}
+
+	if fsm.rrMaxExecTime < uint64(rrSqlExecTime) {
+		fsm.rrMaxExecTime = uint64(rrSqlExecTime)
+	}
+	if fsm.rrMinExecTime > uint64(rrSqlExecTime) {
+		fsm.rrMinExecTime = uint64(rrSqlExecTime)
+	}
 	var prlen int = 0
 	var rrlen int = 0
 	if pr.bRows != nil {
@@ -1618,9 +1796,15 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 
 	//compare exec time
 
-	if rrSqlExecTime > (5 * prSqlExecTime) {
+	if rrSqlExecTime > (10 * prSqlExecTime) {
+		//From http://en.wikipedia.org/wiki/Order_of_magnitude: "We say two
+		//numbers have the same order of magnitude of a number if the big
+		//one divided by the little one is less than 10. For example, 23 and
+		//82 have the same order of magnitude, but 23 and 820 do not."
 		res.ErrCode = 2
-		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
+		res.ErrDesc = fmt.Sprintf("%v us-%v us",
+			prSqlExecTime,
+			rrSqlExecTime)
 		fsm.execFailNum++
 		fsm.execTimeNotEqual++
 		return res
@@ -1686,8 +1870,8 @@ type SqlCompareExecTimeRes struct {
 // errcode 2: exec time difference is doubled
 func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 
-	var prSqlExecTime int64
-	var rrSqlExecTime int64
+	var prSqlExecTime uint64
+	var rrSqlExecTime uint64
 	res := new(SqlCompareExecTimeRes)
 	pr := fsm.pr
 	res.Sql = rr.SqlStatment
@@ -1698,12 +1882,27 @@ func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 		prSqlExecTime = pr.sqlEndTime - pr.sqlBeginTime
 	}
 	fsm.prExecTimeCount += uint64(prSqlExecTime)
+	if fsm.prMaxExecTime < uint64(prSqlExecTime) {
+		fsm.prMaxExecTime = uint64(prSqlExecTime)
+	}
+	if fsm.prMinExecTime > uint64(prSqlExecTime) {
+		fsm.prMinExecTime = uint64(prSqlExecTime)
+	}
 	if rr.SqlEndTime <= rr.SqlBeginTime {
 		rrSqlExecTime = 0
 	} else {
 		rrSqlExecTime = rr.SqlEndTime - rr.SqlBeginTime
 	}
 	fsm.rrExecTimeCount += uint64(rrSqlExecTime)
+	if fsm.rrMaxExecTime < uint64(rrSqlExecTime) {
+		fsm.rrMaxExecTime = uint64(rrSqlExecTime)
+	}
+	if fsm.rrMinExecTime > uint64(rrSqlExecTime) {
+		fsm.rrMinExecTime = uint64(rrSqlExecTime)
+	}
+
+	fsm.setBucketNum(rrSqlExecTime, 1)
+	fsm.setBucketNum(prSqlExecTime, 0)
 
 	if rr.ErrNO != 0 {
 		fsm.rrExecFailCount++
@@ -1726,7 +1925,12 @@ func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 
 	//compare errcode
 	if rr.ErrNO != pr.errNo {
-		if rr.ErrNO != 1032 && rr.ErrNO != 1062 && rr.ErrNO != 1069 &&
+		//ignore errcodes list
+		//1032:HA_ERR_KEY_NOT_FOUND
+		//1062:ER_DUP_KEY
+		//1025:ER_LOCK_WAIT_TIMEOUT
+		//1213:ER_LOCK_DEADLOCK
+		if rr.ErrNO != 1032 && rr.ErrNO != 1062 &&
 			rr.ErrNO != 1025 && rr.ErrNO != 1213 {
 			res.ErrCode = 1
 			res.ErrDesc = fmt.Sprintf("%v-%v", pr.errNo, rr.ErrNO)
@@ -1741,8 +1945,14 @@ func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 	//compare exec time
 
 	if rrSqlExecTime > (5 * prSqlExecTime) {
+		//From http://en.wikipedia.org/wiki/Order_of_magnitude: "We say two
+		//numbers have the same order of magnitude of a number if the big
+		//one divided by the little one is less than 10. For example, 23 and
+		//82 have the same order of magnitude, but 23 and 820 do not."
 		res.ErrCode = 2
-		res.ErrDesc = fmt.Sprintf("%v-%v", prSqlExecTime, rrSqlExecTime)
+		res.ErrDesc = fmt.Sprintf("%v us-%v us",
+			prSqlExecTime,
+			rrSqlExecTime)
 		fsm.execFailNum++
 		fsm.execTimeNotEqual++
 		return res
