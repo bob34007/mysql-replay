@@ -147,10 +147,10 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				return nil
 			}
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
-				log := conn.Logger("replay")
+				logger := conn.Logger("replay")
 				return &replayEventHandler{
 					pconn:       conn,
-					log:         log,
+					log:         logger,
 					dsn:         dsn,
 					filterStr:   filterStr,
 					MySQLConfig: MySQLConfig,
@@ -277,7 +277,7 @@ func (h *replayEventHandler) checkRunOrNot(e stream.MySQLEvent) {
 	//that is, the TSO acquisition time will not be updated this time
 	if time.Since(h.rrLastGetCheckPointTime).Seconds() >
 		float64(h.rrGetCheckPointTimeInterval) {
-		tso := new(tso.TSO)
+		ts := new(tso.TSO)
 		conn, err := h.getConn(h.ctx)
 		if err != nil {
 			h.log.Error("get conn fail ," + err.Error())
@@ -285,15 +285,15 @@ func (h *replayEventHandler) checkRunOrNot(e stream.MySQLEvent) {
 			//h.rrNeedReplay = false
 			return
 		}
-		ullTs, err := tso.GetTSOFromDB(h.ctx, conn, h.log)
+		ullTs, err := ts.GetTSOFromDB(h.ctx, conn, h.log)
 		if err != nil {
 			h.log.Error("get tso fail ," + err.Error())
 			//get tso physical time fail,the sql will replay on replay server
 			//h.rrNeedReplay = false
 			return
 		}
-		tso.ParseTS(ullTs)
-		h.rrCheckPoint = tso.GetPhysicalTime()
+		ts.ParseTS(ullTs)
+		h.rrCheckPoint = ts.GetPhysicalTime()
 		h.rrLastGetCheckPointTime = time.Now()
 	}
 
@@ -594,7 +594,7 @@ LOOP:
 			}
 		}
 	case stream.EventStmtClose:
-		h.stmtClose(ctx, e.StmtID)
+		h.stmtClose(e.StmtID)
 	case stream.EventHandshake:
 		h.quit(false)
 		err = h.handshake(ctx, e.DB)
@@ -673,7 +673,9 @@ func (h *replayEventHandler) getConn(ctx context.Context) (*sql.Conn, error) {
 func (h *replayEventHandler) quit(reconnect bool) {
 	for id, stmt := range h.stmts {
 		if stmt.handle != nil {
-			stmt.handle.Close()
+			if err := stmt.handle.Close(); err != nil {
+				h.log.Warn("close stmt.handle fail ," + err.Error())
+			}
 			stmt.handle = nil
 		}
 		if reconnect {
@@ -683,12 +685,16 @@ func (h *replayEventHandler) quit(reconnect bool) {
 		}
 	}
 	if h.conn != nil {
-		h.conn.Close()
+		if err := h.conn.Close(); err != nil {
+			h.log.Warn("close conn fail ," + err.Error())
+		}
 		h.conn = nil
 		stats.Add(stats.Connections, -1)
 	}
 	if h.pool != nil {
-		h.pool.Close()
+		if err := h.pool.Close(); err != nil {
+			h.log.Warn("close pool fail ," + err.Error())
+		}
 		h.pool = nil
 	}
 }
@@ -707,7 +713,9 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	h.Rr.SqlEndTime = uint64(time.Now().UnixNano())
 	defer func() {
 		if rows != nil {
-			rows.Close()
+			if rs := rows.Close(); rs != nil {
+				h.log.Warn("close row fail," + rs.Error())
+			}
 		}
 	}()
 	stats.Add(stats.ConnRunning, -1)
@@ -728,7 +736,9 @@ func (h *replayEventHandler) stmtPrepare(ctx context.Context, id uint64, query s
 	stmt := h.stmts[id]
 	stmt.query = query
 	if stmt.handle != nil {
-		stmt.handle.Close()
+		if err := stmt.handle.Close(); err != nil {
+			h.log.Warn("close stmt handle fail ," + err.Error())
+		}
 		stmt.handle = nil
 	}
 	delete(h.stmts, id)
@@ -774,7 +784,9 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 	h.Rr.SqlEndTime = uint64(time.Now().UnixNano())
 	defer func() {
 		if rows != nil {
-			rows.Close()
+			if err := rows.Close(); err != nil {
+				h.log.Warn("close rows fail," + err.Error())
+			}
 		}
 	}()
 	stats.Add(stats.ConnRunning, -1)
@@ -792,13 +804,15 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 }
 
 //Close prepare handle
-func (h *replayEventHandler) stmtClose(ctx context.Context, id uint64) {
+func (h *replayEventHandler) stmtClose(id uint64) {
 	stmt, ok := h.stmts[id]
 	if !ok {
 		return
 	}
 	if stmt.handle != nil {
-		stmt.handle.Close()
+		if err := stmt.handle.Close(); err != nil {
+			h.log.Warn("close stmt handle fail," + err.Error())
+		}
 		stmt.handle = nil
 	}
 	delete(h.stmts, id)

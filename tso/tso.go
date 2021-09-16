@@ -41,7 +41,7 @@ func (tso *TSO) ParseTS(ts uint64) {
 		int64(physical)%1000*time.Millisecond.Nanoseconds())
 }
 
-//Get checkpint TSO from DB
+//Get checkpoint TSO from DB
 func (tso *TSO) GetTSOFromDB(ctx context.Context, conn *sql.Conn, log *zap.Logger) (uint64, error) {
 	query := "select checkPoint  from tidb_binlog.checkpoint; "
 	var strCheckPoint string
@@ -53,7 +53,10 @@ func (tso *TSO) GetTSOFromDB(ctx context.Context, conn *sql.Conn, log *zap.Logge
 	rows, err = conn.QueryContext(ctx, query)
 	defer func() {
 		if rows != nil {
-			rows.Close()
+			res := rows.Close()
+			if res != nil {
+				log.Error("close row error ," + res.Error())
+			}
 		}
 	}()
 	if err != nil {

@@ -199,27 +199,7 @@ type PacketRes struct {
 	ifReadResEnd bool
 }
 
-type MySQLFSM struct {
-	log *zap.Logger
-
-	// state info
-	changed bool
-	state   int
-	query   string        // com_query
-	stmt    Stmt          // com_stmt_prepare,com_stmt_execute,com_stmt_close
-	params  []interface{} // com_stmt_execute
-
-	// session info
-	schema string          // handshake1
-	stmts  map[uint32]Stmt // com_stmt_prepare,com_stmt_execute,com_stmt_close
-
-	// current command
-	data    *bytes.Buffer
-	packets []MySQLPacket
-	start   int
-	count   int
-	pr      *PacketRes
-	//Rr          *ReplayRes
+type FSMStatic struct {
 	execSqlNum         uint64
 	execSuccNum        uint64
 	execFailNum        uint64
@@ -253,6 +233,30 @@ type MySQLFSM struct {
 	rrExecFailCount    uint64
 	rrMaxExecTime      uint64
 	rrMinExecTime      uint64
+}
+
+type MySQLFSM struct {
+	log *zap.Logger
+
+	// state info
+	changed bool
+	state   int
+	query   string        // com_query
+	stmt    Stmt          // com_stmt_prepare,com_stmt_execute,com_stmt_close
+	params  []interface{} // com_stmt_execute
+
+	// session info
+	schema string          // handshake1
+	stmts  map[uint32]Stmt // com_stmt_prepare,com_stmt_execute,com_stmt_close
+
+	// current command
+	data    *bytes.Buffer
+	packets []MySQLPacket
+	start   int
+	count   int
+	pr      *PacketRes
+	//Rr          *ReplayRes
+	FSMStatic
 }
 
 func (fsm *MySQLFSM) State() int { return fsm.state }
@@ -420,7 +424,7 @@ func (fsm *MySQLFSM) load(k int) bool {
 //Only change status ,do not modify fsm.changed
 //Used in comQuery and comstmTexecut state
 //for read result
-func (fsm *MySQLFSM) setStatusWithNoChange(to int, msg ...string) {
+func (fsm *MySQLFSM) setStatusWithNoChange(to int) {
 	from := fsm.state
 	fsm.state = to
 	logstr := fmt.Sprintf("fsm.stsatus changed  %s -> %s ", StateName(from), StateName(to))
