@@ -243,9 +243,9 @@ type replayEventHandler struct {
 	rrLastGetCheckPointTime     time.Time
 	rrCheckPoint                time.Time
 	rrGetCheckPointTimeInterval int64
-	rrContinueRun               bool
-	rrNeedReplay                bool
-	Rr                          *stream.ReplayRes
+	//rrContinueRun               bool
+	rrNeedReplay bool
+	Rr           *stream.ReplayRes
 }
 
 //init values for replay new sql
@@ -268,46 +268,39 @@ func (h *replayEventHandler) rrInit() {
 }
 
 //Check whether the SQL needs to be run
-func (h *replayEventHandler) checkRunOrWait(e stream.MySQLEvent) {
+func (h *replayEventHandler) checkRunOrNot(e stream.MySQLEvent) {
 
 	h.rrNeedReplay = true
-	if !h.rrContinueRun {
-		if time.Since(h.rrLastGetCheckPointTime).Seconds() >
-			float64(h.rrGetCheckPointTimeInterval) {
-			tso := new(tso.TSO)
-			conn, err := h.getConn(h.ctx)
-			if err != nil {
-				h.log.Error("get conn fail ," + err.Error())
-				//conn db fail , set rrContinueRun true ,process continue run
-				h.rrContinueRun = true
-				return
-			}
-			ullTs, err := tso.GetTSOFromDB(h.ctx, conn, h.log)
-			if err != nil {
-				h.log.Error("get tso fail ," + err.Error())
-				h.rrContinueRun = true
-				return
-			}
-			tso.ParseTS(ullTs)
-			h.rrCheckPoint = tso.GetPhysicalTime()
-			h.rrLastGetCheckPointTime = time.Now()
+	if time.Since(h.rrLastGetCheckPointTime).Seconds() >
+		float64(h.rrGetCheckPointTimeInterval) {
+		tso := new(tso.TSO)
+		conn, err := h.getConn(h.ctx)
+		if err != nil {
+			h.log.Error("get conn fail ," + err.Error())
+			//conn db fail , set rrContinueRun true ,process continue run
+			return
 		}
+		ullTs, err := tso.GetTSOFromDB(h.ctx, conn, h.log)
+		if err != nil {
+			h.log.Error("get tso fail ," + err.Error())
+			return
+		}
+		tso.ParseTS(ullTs)
+		h.rrCheckPoint = tso.GetPhysicalTime()
+		h.rrLastGetCheckPointTime = time.Now()
+	}
 
-		if h.rrCheckPoint.UnixNano()+ //h.rrGetCheckPointTimeInterval < e.Time {
-			int64(float64(h.rrGetCheckPointTimeInterval)/2*1000*1000000) < e.Time {
-			h.rrContinueRun = true
-			return
-		} else {
-			/*logstr := fmt.Sprintf("%d", e.Time-h.rrCheckPoint.UnixNano())
-			h.log.Info("replay run fastet than binlog ,wait " + logstr + "Nanosecond")
-			time.Sleep(time.Duration(e.Time-h.rrCheckPoint.UnixNano()-7*1000*1000000) *
-				time.Nanosecond)
-			h.rrContinueRun = true
-			return*/
-			h.rrContinueRun = true
-			h.rrNeedReplay = false
-			return
-		}
+	if h.rrCheckPoint.UnixNano()+ //h.rrGetCheckPointTimeInterval < e.Time {
+		int64(float64(h.rrGetCheckPointTimeInterval)/2*1000*1000000) < e.Time {
+		return
+	} else {
+		/*logstr := fmt.Sprintf("%d", e.Time-h.rrCheckPoint.UnixNano())
+		h.log.Info("replay run fastet than binlog ,wait " + logstr + "Nanosecond")
+		time.Sleep(time.Duration(e.Time-h.rrCheckPoint.UnixNano()-7*1000*1000000) *
+			time.Nanosecond)
+		return*/
+		h.rrNeedReplay = false
+		return
 	}
 
 }
@@ -535,12 +528,9 @@ LOOP:
 		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
 			if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
 				h.Rr.ColValues = make([][]driver.Value, 0)
-				if !h.rrContinueRun {
-					h.checkRunOrWait(e)
-					h.rrContinueRun = false
-					if !h.rrNeedReplay {
-						return nil
-					}
+				h.checkRunOrNot(e)
+				if !h.rrNeedReplay {
+					return nil
 				}
 				err = h.execute(ctx, e.Query)
 				h.needCompareRes = true
@@ -575,10 +565,7 @@ LOOP:
 			_, ok := h.stmts[e.StmtID]
 			if ok {
 				h.Rr.ColValues = make([][]driver.Value, 0)
-				if !h.rrContinueRun {
-					h.checkRunOrWait(e)
-					h.rrContinueRun = false
-				}
+				h.checkRunOrNot(e)
 				if !h.rrNeedReplay {
 					return nil
 				}
