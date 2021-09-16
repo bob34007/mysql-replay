@@ -882,6 +882,7 @@ func (h *textDumpHandler) OnClose() {
 	}
 }*/
 
+//add sub command replay
 func NewTextCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "text",

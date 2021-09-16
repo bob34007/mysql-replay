@@ -427,6 +427,7 @@ func (fsm *MySQLFSM) setStatusWithNoChange(to int, msg ...string) {
 	fsm.log.Debug(logstr)
 }
 
+//set fsm state
 func (fsm *MySQLFSM) set(to int, msg ...string) {
 	from := fsm.state
 	fsm.state = to
