@@ -267,22 +267,29 @@ func (h *replayEventHandler) rrInit() {
 
 }
 
-//Check whether the SQL needs to be run
+//Check whether the SQL needs replay on server
 func (h *replayEventHandler) checkRunOrNot(e stream.MySQLEvent) {
 
 	h.rrNeedReplay = true
+
+	//Determine whether to obtain tSO again
+	//If the tSO acquisition failed last time, it will be acquired again this time,
+	//that is, the TSO acquisition time will not be updated this time
 	if time.Since(h.rrLastGetCheckPointTime).Seconds() >
 		float64(h.rrGetCheckPointTimeInterval) {
 		tso := new(tso.TSO)
 		conn, err := h.getConn(h.ctx)
 		if err != nil {
 			h.log.Error("get conn fail ," + err.Error())
-			//conn db fail , set rrContinueRun true ,process continue run
+			//conn db fail , the sql will replay on replay server
+			//h.rrNeedReplay = false
 			return
 		}
 		ullTs, err := tso.GetTSOFromDB(h.ctx, conn, h.log)
 		if err != nil {
 			h.log.Error("get tso fail ," + err.Error())
+			//get tso physical time fail,the sql will replay on replay server
+			//h.rrNeedReplay = false
 			return
 		}
 		tso.ParseTS(ullTs)
@@ -290,7 +297,7 @@ func (h *replayEventHandler) checkRunOrNot(e stream.MySQLEvent) {
 		h.rrLastGetCheckPointTime = time.Now()
 	}
 
-	if h.rrCheckPoint.UnixNano()+ //h.rrGetCheckPointTimeInterval < e.Time {
+	if h.rrCheckPoint.UnixNano()+
 		int64(float64(h.rrGetCheckPointTimeInterval)/2*1000*1000000) < e.Time {
 		return
 	} else {
