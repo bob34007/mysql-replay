@@ -15,6 +15,7 @@ type TSO struct {
 	logical      uint64
 }
 
+//Saves data parsed from the checkpoint JSON string obtained from the database
 type MysqlCheckPoint struct {
 	ConsistentSaved bool             `toml:"consistent" json:"consistent"`
 	CommitTS        uint64           `toml:"commitTS" json:"commitTS"`
@@ -66,6 +67,11 @@ func (tso *TSO) GetTSOFromDB(ctx context.Context, conn *sql.Conn, log *zap.Logge
 			return 0, err
 		}
 		log.Info("get checkpoint from db success ," + strCheckPoint)
+	}
+
+	if len(strCheckPoint) == 0 {
+		log.Error("get checkpoint json string fail")
+		return 0, err
 	}
 
 	//get checkpoint from json string

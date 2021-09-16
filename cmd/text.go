@@ -711,6 +711,11 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	h.Rr.SqlStatment = query
 	rows, err := conn.QueryContext(ctx, query)
 	h.Rr.SqlEndTime = uint64(time.Now().UnixNano())
+	defer func() {
+		if rows != nil {
+			rows.Close()
+		}
+	}()
 	stats.Add(stats.ConnRunning, -1)
 	if err != nil {
 		//h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
@@ -720,7 +725,6 @@ func (h *replayEventHandler) execute(ctx context.Context, query string) error {
 	for rows.Next() {
 		h.ReadRowValues(rows)
 	}
-	defer rows.Close()
 
 	return nil
 }
@@ -774,6 +778,11 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 	h.Rr.SqlBeginTime = uint64(time.Now().UnixNano())
 	rows, err := stmt.QueryContext(ctx, params...)
 	h.Rr.SqlEndTime = uint64(time.Now().UnixNano())
+	defer func() {
+		if rows != nil {
+			rows.Close()
+		}
+	}()
 	stats.Add(stats.ConnRunning, -1)
 	if err != nil {
 		//h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
@@ -784,7 +793,6 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 	for rows.Next() {
 		h.ReadRowValues(rows)
 	}
-	defer rows.Close()
 
 	return nil
 }
