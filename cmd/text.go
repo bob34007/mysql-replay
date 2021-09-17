@@ -621,7 +621,7 @@ LOOP:
 	return err
 }
 
-//connect to server
+//connect to server and set autocommit on
 func (h *replayEventHandler) open(schema string) (*sql.DB, error) {
 	cfg := h.MySQLConfig
 	if len(schema) > 0 && cfg.DBName != schema {
@@ -629,7 +629,22 @@ func (h *replayEventHandler) open(schema string) (*sql.DB, error) {
 		cfg.DBName = schema
 	}
 
-	return sql.Open("mysql", cfg.FormatDSN())
+	db, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		return nil, err
+	}
+	//for sql "select ... for update "
+	if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
+		_, err = db.Exec("set autocommit = on ;")
+		if err != nil {
+			rs := db.Close()
+			if rs != nil {
+				h.log.Warn("close db fail ," + rs.Error())
+			}
+			return nil, err
+		}
+	}
+	return db, err
 }
 
 //Handle Handshake messages, similar to Use Database
