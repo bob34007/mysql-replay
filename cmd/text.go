@@ -102,9 +102,10 @@ var ERRORTIMEOUT = errors.New("replay runtime out")
 }
 */
 
-//Replay sql from pcap files，and compare reslut from pcap file and
-//replay server
 func NewTextDumpReplayCommand() *cobra.Command {
+	//Replay sql from pcap files，and compare reslut from pcap file and
+	//replay server
+
 	var (
 		options   = stream.FactoryOptions{Synchronized: true}
 		dsn       string
@@ -312,9 +313,10 @@ func (h *replayEventHandler) checkRunOrNot(e stream.MySQLEvent) {
 
 }
 
-//Process SQL events. Note that unlike the events in binlog,
-//this SQL event is raw and may involve multiple rows
 func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
+	//Process SQL events. Note that unlike the events in binlog,
+	//this SQL event is raw and may involve multiple rows
+
 	if h.fsm == nil {
 		h.fsm = e.Fsm
 	}
@@ -371,8 +373,9 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 
 }
 
-//print static message
 func StaticPrintForExecTime() {
+	//print static message
+
 	stream.Sm.Lock()
 	defer stream.Sm.Unlock()
 	fmt.Println("-------compare result -------------")
@@ -437,8 +440,9 @@ func StaticPrintForExecTime() {
 	fmt.Println("-------compare result -------------")
 }
 
-//print static message
 func StaticPrintForSelect() {
+	//print static message
+
 	stream.Sm.Lock()
 	defer stream.Sm.Unlock()
 	fmt.Println("-------compare result -------------")
@@ -524,8 +528,8 @@ func (h *replayEventHandler) OnClose() {
 	h.quit(false)
 }
 
-//apply mysql event on replay server
 func (h *replayEventHandler) ApplyEvent(ctx context.Context, e stream.MySQLEvent) error {
+	//apply mysql event on replay server
 	var err error
 	h.needCompareRes = false
 	h.needCompareExecTime = false
@@ -853,8 +857,8 @@ func (h *replayEventHandler) getStmt(ctx context.Context, id uint64) (*sql.Stmt,
 	return stmt.handle, nil
 }
 
-//Get column from sql.Rows structure
 func (h *replayEventHandler) GetColNames(f *sql.Rows) {
+	//Get column from sql.Rows structure
 	var err error
 	h.Rr.ColNames, err = f.Columns()
 	if err != nil {
@@ -862,10 +866,11 @@ func (h *replayEventHandler) GetColNames(f *sql.Rows) {
 	}
 }
 
-//Get the lastcols value from the sql.Rows
-//structure using unsafe and reflection mechanisms
-//and load it into the cache
 func (h *replayEventHandler) ReadRowValues(f *sql.Rows) {
+	//Get the lastcols value from the sql.Rows
+	//structure using unsafe and reflection mechanisms
+	//and load it into the cache
+
 	rs := reflect.ValueOf(f)
 	foo := rs.Elem().FieldByName("lastcols")
 	rf := foo
@@ -911,8 +916,9 @@ func (h *textDumpHandler) OnClose() {
 	}
 }*/
 
-//add sub command replay
 func NewTextCommand() *cobra.Command {
+	//add sub command replay
+
 	cmd := &cobra.Command{
 		Use:   "text",
 		Short: "Text format utilities",

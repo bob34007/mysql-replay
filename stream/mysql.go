@@ -620,12 +620,10 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 	fsm.set(StateComStmtExecute)
 }
 
-//Check whether the statement is a SELECT statement
-//or a SELECT prepare statement
 func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
-	/*s := strings.ToLower(query)
-	s1 := strings.TrimSpace(s)
-	return strings.HasPrefix(s1, "select")*/
+	//Check whether the statement is a SELECT statement
+	//or a SELECT prepare statement
+
 	fsm.log.Debug(query)
 	if len(query) < 6 {
 		return false
@@ -653,8 +651,9 @@ func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
 	return false
 }
 
-//handle prepare close
 func (fsm *MySQLFSM) handleComStmtCloseNoLoad() {
+	//handle prepare close
+
 	stmtID, _, ok := readUint32(fsm.data.Bytes()[1:])
 	if !ok {
 		fsm.set(StateUnknown, "stmt close: cannot read stmt id")
@@ -676,8 +675,9 @@ func (fsm *MySQLFSM) handleComStmtPrepareRequestNoLoad() {
 	fsm.set(StateComStmtPrepare0)
 }
 
-//handle prepare response
 func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
+	//handle prepare response
+
 	if !fsm.load(1) {
 		fsm.set(StateUnknown, "stmt prepare: cannot load packet")
 		fsm.log.Warn("parse prepare reaponse fail , can not load packet " +
@@ -736,8 +736,9 @@ func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 	fsm.set(StateComStmtPrepare1)
 }
 
-//handle handshake response
 func (fsm *MySQLFSM) handleHandshakeResponse() {
+	//handle handshake response
+
 	if !fsm.load(1) {
 		fsm.set(StateUnknown, "handshake: cannot load packet")
 		fsm.log.Warn("parse prepare reaponse fail , can not load packet " +
@@ -845,8 +846,9 @@ func (fsm *MySQLFSM) handleHandshakeResponse() {
 	fsm.set(StateHandshake1)
 }
 
-//parse  prepare params
 func parseExecParams(stmt Stmt, nullBitmap []byte, paramTypes []byte, paramValues []byte) (params []interface{}, err error) {
+	//parse  prepare params
+
 	defer func() {
 		if x := recover(); x != nil {
 			params = nil
@@ -1000,8 +1002,9 @@ func parseExecParams(stmt Stmt, nullBitmap []byte, paramTypes []byte, paramValue
 	return params, nil
 }
 
-//parse data
 func parseBinaryDate(pos int, paramValues []byte) (int, string) {
+	//parse data
+
 	year := binary.LittleEndian.Uint16(paramValues[pos : pos+2])
 	pos += 2
 	month := paramValues[pos]
@@ -1055,6 +1058,7 @@ func parseBinaryTimeWithMS(pos int, paramValues []byte, isNegative uint8) (int, 
 //read packet len
 //https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
 func parseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
+
 	switch b[0] {
 	// 251: NULL
 	case 0xfb:
