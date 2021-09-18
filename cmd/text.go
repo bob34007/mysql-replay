@@ -133,10 +133,11 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				log.Error("parse runTime error " + err.Error())
 				return nil
 			}
+
 			if rt > 0 {
 				ticker = time.NewTicker(3 * time.Second)
-
 			}
+			ticker1 := time.NewTicker(3 * time.Second)
 			if len(dsn) == 0 {
 				log.Error("need to specify DSN for replay sql ")
 				return nil
@@ -170,6 +171,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 					return errors.Annotate(err, "open "+name)
 				}
 				defer f.Close()
+				logger := zap.L().With(zap.String("conn", "compare"))
 				src := gopacket.NewPacketSource(f, f.LinkType())
 				for pkt := range src.Packets() {
 					layer := pkt.Layer(layers.LayerTypeTCP)
@@ -178,16 +180,26 @@ func NewTextDumpReplayCommand() *cobra.Command {
 					}
 					tcp := layer.(*layers.TCP)
 					assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
-					if rt > 0 {
+					if rt>0 {
 						select {
 						case <-ticker.C:
 							if time.Since(ts).Seconds() > float64(rt*60) {
 								return ERRORTIMEOUT
 							}
+						case <-ticker1.C:
+							LogCompareResutTimer(logger)
+						default:
+							//
+						}
+					}else {
+						select {
+						case <-ticker1.C:
+							LogCompareResutTimer(logger)
 						default:
 							//
 						}
 					}
+
 				}
 				return nil
 			}
@@ -204,6 +216,10 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			}
 
 			assembler.FlushAll()
+			if rt >0 {
+				ticker.Stop()
+			}
+			ticker1.Stop()
 			if filterStr == "select" {
 				StaticPrintForSelect()
 			} else {
@@ -371,6 +387,16 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 		return
 	}
 
+}
+
+func LogCompareResutTimer(log *zap.Logger) {
+	stream.Sm.Lock()
+	defer stream.Sm.Unlock()
+	log.Info("exec sql :"+fmt.Sprintf("%v",stream.ExecSqlNum))
+	log.Info("compare succ :" + fmt.Sprintf("%v", stream.ExecSuccNum))
+	if stream.ExecSqlNum > 0 {
+		log.Info("sompare succ proportion " + fmt.Sprintf("%v", stream.ExecSuccNum*100/stream.ExecSqlNum) + "%")
+	}
 }
 
 func StaticPrintForExecTime() {

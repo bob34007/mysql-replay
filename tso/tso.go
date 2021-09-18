@@ -72,11 +72,6 @@ func (tso *TSO) GetTSOFromDB(ctx context.Context, conn *sql.Conn, log *zap.Logge
 		log.Info("get checkpoint from db success ," + strCheckPoint)
 	}
 
-	if len(strCheckPoint) == 0 {
-		log.Error("get checkpoint json string fail")
-		return 0, err
-	}
-
 	//get checkpoint from json string
 	if err = json.Unmarshal([]byte(strCheckPoint), mysqlCheckPoint); err != nil {
 		log.Error("unmarshal checkpoint fail," + err.Error())
