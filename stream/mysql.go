@@ -339,6 +339,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		err := fsm.handleReadSQLResult()
 		if err != nil {
 			fsm.log.Warn("read packet fail ," + err.Error())
+			fsm.pr.ifReadResEnd = true
 		}
 		if fsm.pr.tRows != nil {
 			if fsm.pr.tRows.rs.done {
@@ -356,9 +357,11 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		if fsm.state == StateComStmtExecute {
 			fsm.setStatusWithNoChange(StateComStmtExecute1)
 		}
+
 		err := fsm.handleReadPrepareExecResult()
 		if err != nil {
 			fsm.log.Warn("read packet fail ," + err.Error())
+			fsm.pr.ifReadResEnd = true
 		}
 		if fsm.pr.bRows != nil {
 			if fsm.pr.bRows.rs.done {
@@ -375,11 +378,6 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		}
 	}
 
-	/*if (fsm.state == StateComQuery || fsm.state == StateComStmtExecute) &&
-		fsm.pr.sqlBeginTime == 0 {
-		fsm.pr.sqlBeginTime = pkt.Time.UnixNano() / int64(time.Millisecond)
-		fsm.log.Debug("sql begin time is :" + fmt.Sprintf("%v", fsm.pr.sqlBeginTime))
-	}*/
 }
 
 func (fsm *MySQLFSM) Packets() []MySQLPacket {
@@ -1189,9 +1187,13 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 				fmt.Sprintf("%d", fsm.pr.packetnum) +
 				fmt.Sprintf("%d", len(fsm.packets)))
 			fsm.pr.ifReadResEnd = true
-			if mysqlError, ok := err.(*mysql.MySQLError); ok {
+			if mysqlError, ok := err.(*MySQLError); ok{
 				fsm.pr.errNo = mysqlError.Number
 				fsm.pr.errDesc = mysqlError.Message
+			} else {
+				fsm.log.Warn("chang to MySQLError fail ,"+err.Error())
+				fsm.pr.errNo = 20000
+				fsm.pr.errDesc = "exec sql fail and coverted to mysql errorstruct err"
 			}
 			return err
 		}
@@ -1199,7 +1201,7 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 			fsm.pr.ifReadResEnd = true
 		}
 		fsm.log.Debug("read " + fmt.Sprintf("%d", fsm.pr.columnNum) + " columns from packets")
-		fsm.log.Debug(fmt.Sprintf("%v", fsm.pr.ifReadResEnd))
+		fsm.log.Debug(fmt.Sprintf("read column end or not :%v", fsm.pr.ifReadResEnd))
 		return nil
 	}
 
@@ -1274,8 +1276,13 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 				fmt.Sprintf("%d", len(fsm.packets)))
 			fsm.pr.ifReadResEnd = true
 			if mysqlError, ok := err.(*mysql.MySQLError); ok {
+				//fmt.Println("change to mysql.MySQLError success",err)
 				fsm.pr.errNo = mysqlError.Number
 				fsm.pr.errDesc = mysqlError.Message
+			} else {
+				fsm.log.Warn("chang to MySQLError fail ,"+err.Error())
+				fsm.pr.errNo = 20000
+				fsm.pr.errDesc = "exec sql fail and coverted to mysql errorstruct err"
 			}
 			return err
 		}
@@ -1337,11 +1344,16 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 				}
 				if err == io.EOF {
 					fsm.log.Debug("read respose end ")
+					//fmt.Println(rows.rs.columnValue)
 					return nil
-				}
-				if err != nil {
-					fsm.log.Debug("resd rows from packet error" +
+				} else if err != nil {
+					fsm.log.Warn("read rows from packet error " +
 						err.Error())
+					fsm.load(fsm.pr.packetnum - 1)
+					data := fsm.data.Bytes()
+					logstr := fmt.Sprintf("read %v row error ,the packet is %v  ", len(rows.rs.columnValue), data)
+					fsm.log.Warn(logstr)
+					rows.rs.done = true
 					return err
 				}
 			}
@@ -1571,10 +1583,22 @@ type SqlCompareRes struct {
 	ErrDesc string        `json:"errdesc"`
 }
 
+func ConvertAssignRows(a driver.Value,as *string ) error {
+	return convertAssignRows(as,a)
+}
+
+
 //Compare the value of each column in the result set
 //* converting the column value to a string
-func CompareValue(a driver.Value, b driver.Value) (bool, error) {
+func CompareValue(a driver.Value, b driver.Value, log *zap.Logger) (bool, error) {
 	var as string
+	if a ==nil && b ==nil{
+		return true,nil
+	} else if a == nil && b!=nil{
+		return false ,nil
+	} else if a !=nil && b == nil{
+		return false ,nil
+	}
 	err := convertAssignRows(&as, a)
 	if err != nil {
 		return false, err
@@ -1585,6 +1609,8 @@ func CompareValue(a driver.Value, b driver.Value) (bool, error) {
 		return false, err
 	}
 	if as != bs {
+		logstr := fmt.Sprintf("detail compare not equal : %v-%v %v-%v ", a, b, as, bs)
+		log.Warn(logstr)
 		return false, nil
 	}
 	return true, nil
@@ -1736,6 +1762,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	pr := fsm.pr
 	res.Sql = rr.SqlStatment
 	res.Values = rr.Values
+	//var err error
 	fsm.execSqlNum++
 	var prSqlExecTime uint64
 	if pr.sqlBeginTime < pr.sqlEndTime {
@@ -1805,7 +1832,8 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 
 	//compare exec time
 
-	if rrSqlExecTime > (10 * prSqlExecTime) {
+	if rrSqlExecTime > (10*prSqlExecTime) &&
+		rrSqlExecTime > 150*1000000 {
 		//From http://en.wikipedia.org/wiki/Order_of_magnitude: "We say two
 		//numbers have the same order of magnitude of a number if the big
 		//one divided by the little one is less than 10. For example, 23 and
@@ -1827,6 +1855,10 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 		fsm.execFailNum++
 		fsm.rowCountNotequal++
 		return res
+	} else if prlen == 0 {
+		res.ErrCode = 0
+		fsm.execSuccNum++
+		return res
 	}
 
 	//compare result row detail
@@ -1838,6 +1870,8 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 		prrows = pr.tRows.rs.columnValue
 	}
 	rrrows = rr.ColValues
+
+
 	i := len(prrows)
 	for j := 0; j < i; j++ {
 		if len(rrrows[j]) != len(prrows[j]) {
@@ -1847,7 +1881,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 			return res
 		}
 		for k := 0; k < len(rrrows[j]); k++ {
-			r, e := CompareValue(rrrows[j][k], prrows[j][k])
+			r, e := CompareValue(rrrows[j][k], prrows[j][k], fsm.log)
 			if e != nil || !r {
 				res.ErrCode = 4
 				if e != nil {
@@ -1855,6 +1889,8 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 						" value failed to be resolved ," + e.Error()
 					fsm.log.Warn(res.ErrDesc)
 				}
+				logstr := fmt.Sprintf("read values from packet and replay server not equal %v - %v", prrows, rrrows)
+				fsm.log.Warn(logstr)
 				fsm.execFailNum++
 				fsm.rowDetailNotEqual++
 				return res
@@ -1868,7 +1904,7 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	return res
 }
 
-type SqlCompareExecTimeRes struct {
+/*type SqlCompareExecTimeRes struct {
 	Sql     string `json:"sql"`
 	ErrCode int    `json:"errcode"`
 	ErrDesc string `json:"errdesc"`
@@ -1971,4 +2007,4 @@ func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
 	fsm.execSuccNum++
 
 	return res
-}
+}*/

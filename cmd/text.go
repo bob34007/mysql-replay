@@ -107,10 +107,9 @@ func NewTextDumpReplayCommand() *cobra.Command {
 	//replay server
 
 	var (
-		options   = stream.FactoryOptions{Synchronized: true}
-		dsn       string
-		filterStr string
-		runTime   string
+		options = stream.FactoryOptions{Synchronized: true}
+		dsn     string
+		runTime string
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -121,10 +120,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			if len(args) == 0 {
 				return cmd.Help()
 			}
-			if filterStr != "select" && filterStr != "all" {
-				log.Error("filtering rules support only select or all")
-				return nil
-			}
+
 			ts := time.Now()
 			var ticker *time.Ticker
 			var rt int
@@ -154,7 +150,6 @@ func NewTextDumpReplayCommand() *cobra.Command {
 					pconn:       conn,
 					log:         logger,
 					dsn:         dsn,
-					filterStr:   filterStr,
 					MySQLConfig: MySQLConfig,
 					ctx:         context.Background(),
 					Rr:          new(stream.ReplayRes),
@@ -180,7 +175,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 					}
 					tcp := layer.(*layers.TCP)
 					assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
-					if rt>0 {
+					if rt > 0 {
 						select {
 						case <-ticker.C:
 							if time.Since(ts).Seconds() > float64(rt*60) {
@@ -191,7 +186,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 						default:
 							//
 						}
-					}else {
+					} else {
 						select {
 						case <-ticker1.C:
 							LogCompareResutTimer(logger)
@@ -216,20 +211,16 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			}
 
 			assembler.FlushAll()
-			if rt >0 {
+			if rt > 0 {
 				ticker.Stop()
 			}
 			ticker1.Stop()
-			if filterStr == "select" {
-				StaticPrintForSelect()
-			} else {
-				StaticPrintForExecTime()
-			}
+			StaticPrintForSelect()
 			log.Info("process end run at " + time.Now().String())
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&filterStr, "filter", "f", "select", "replay filtering rules")
+
 	cmd.Flags().StringVarP(&dsn, "dsn", "d", "", "replay server dsn")
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
 	cmd.Flags().StringVarP(&runTime, "runtime", "t", "0", "replay server run time")
@@ -344,14 +335,10 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 			h.Rr.ErrNO = mysqlError.Number
 			h.Rr.ErrDesc = mysqlError.Message
 		} else {
-			fmt.Println(err.Error(), ok)
+			//fmt.Println(err.Error(), ok)
 			h.Rr.ErrNO = 20000
 			h.Rr.ErrDesc = "exec sql fail and coverted to mysql errorstruct err"
 		}
-	}
-
-	if !h.rrNeedReplay {
-		return
 	}
 
 	defer func() {
@@ -361,109 +348,27 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 
 	}()
 
-	if h.needCompareRes {
-		res := h.fsm.CompareRes(h.Rr)
-		if res.ErrCode != 0 {
-			logstr, err := json.Marshal(res)
-			if err != nil {
-				h.log.Warn("compare result marshal to json error " + err.Error())
-				return
-			}
-			h.log.Info(string(logstr))
+	res := h.fsm.CompareRes(h.Rr)
+	if res.ErrCode != 0 {
+		logstr, err := json.Marshal(res)
+		if err != nil {
+			h.log.Warn("compare result marshal to json error " + err.Error())
+			return
 		}
-		return
+		h.log.Info(string(logstr))
 	}
-
-	if h.needCompareExecTime {
-		res := h.fsm.CompareExecTime(h.Rr)
-		if res.ErrCode != 0 {
-			logstr, err := json.Marshal(res)
-			if err != nil {
-				h.log.Warn("compare result marshal to json error " + err.Error())
-				return
-			}
-			h.log.Info(string(logstr))
-		}
-		return
-	}
+	return
 
 }
 
 func LogCompareResutTimer(log *zap.Logger) {
 	stream.Sm.Lock()
 	defer stream.Sm.Unlock()
-	log.Info("exec sql :"+fmt.Sprintf("%v",stream.ExecSqlNum))
+	log.Info("exec sql :" + fmt.Sprintf("%v", stream.ExecSqlNum))
 	log.Info("compare succ :" + fmt.Sprintf("%v", stream.ExecSuccNum))
 	if stream.ExecSqlNum > 0 {
 		log.Info("sompare succ proportion " + fmt.Sprintf("%v", stream.ExecSuccNum*100/stream.ExecSqlNum) + "%")
 	}
-}
-
-func StaticPrintForExecTime() {
-	//print static message
-
-	stream.Sm.Lock()
-	defer stream.Sm.Unlock()
-	fmt.Println("-------compare result -------------")
-	fmt.Println("compare sql : ", stream.ExecSqlNum)
-	fmt.Print("compare succ :", stream.ExecSuccNum, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.ExecSuccNum*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Print("compare fail :", stream.ExecFailNum, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.ExecFailNum*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	//fmt.Println()
-	fmt.Print("exec errno fail :", stream.ExecErrNoNotEqual, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.ExecErrNoNotEqual*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Print("exec time fail :", stream.ExecTimeNotEqual, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.ExecTimeNotEqual*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Println()
-	fmt.Println("-------from packet -------------")
-	fmt.Println("exec succ sql count :", stream.PrExecSuccCount)
-	fmt.Println("exec fail sql count :", stream.PrExecFailCount)
-	fmt.Println("exec time :", stream.PrExecTimeCount/uint64(time.Millisecond))
-	if stream.ExecSqlNum > 0 {
-		fmt.Printf("avg exec  time: %.2f \n",
-			float64(stream.PrExecTimeCount)/float64(stream.ExecSqlNum)/float64(time.Millisecond))
-	}
-	fmt.Println("max exec time: ", stream.PrMaxExecTime/uint64(time.Millisecond))
-	fmt.Println("min exec time: ", stream.PrMinExecTime/uint64(time.Millisecond))
-	fmt.Println("exec in 10ms: ", stream.PrExecTimeIn10ms)
-	fmt.Println("exec in 20ms: ", stream.PrExecTimeIn20ms)
-	fmt.Println("exec in 30ms: ", stream.PrExecTimeIn30ms)
-	fmt.Println("exec in 40ms: ", stream.PrExecTimeIn40ms)
-	fmt.Println("exec in 50ms: ", stream.PrExecTimeIn50ms)
-	fmt.Println("exec in 100ms: ", stream.PrExecTimeIn100ms)
-	fmt.Println("exec out 100ms: ", stream.PrExecTimeOut100ms)
-	fmt.Println()
-	fmt.Println("-------from replay server -------------")
-	fmt.Println("exec succ sql count :", stream.RrExecSuccCount)
-	fmt.Println("exec fail sql count :", stream.RrExecFailCount)
-	fmt.Println("exec time  :", stream.RrExecTimeCount/uint64(time.Millisecond))
-	if stream.ExecSqlNum > 0 {
-		fmt.Printf("avg exec  time: %.2f \n",
-			float64(stream.RrExecTimeCount)/float64(stream.ExecSqlNum)/float64(time.Millisecond))
-	}
-	fmt.Println("max exec time: ", stream.RrMaxExecTime/uint64(time.Millisecond))
-	fmt.Println("min exec time: ", stream.RrMinExecTime/uint64(time.Millisecond))
-	fmt.Println("exec in 10ms: ", stream.RrExecTimeIn10ms)
-	fmt.Println("exec in 20ms: ", stream.RrExecTimeIn20ms)
-	fmt.Println("exec in 30ms: ", stream.RrExecTimeIn30ms)
-	fmt.Println("exec in 40ms: ", stream.RrExecTimeIn40ms)
-	fmt.Println("exec in 50ms: ", stream.RrExecTimeIn50ms)
-	fmt.Println("exec in 100ms: ", stream.RrExecTimeIn100ms)
-	fmt.Println("exec out 100ms: ", stream.RrExecTimeOut100ms)
-	fmt.Println("-------compare result -------------")
 }
 
 func StaticPrintForSelect() {
@@ -557,35 +462,14 @@ func (h *replayEventHandler) OnClose() {
 func (h *replayEventHandler) ApplyEvent(ctx context.Context, e stream.MySQLEvent) error {
 	//apply mysql event on replay server
 	var err error
-	h.needCompareRes = false
-	h.needCompareExecTime = false
 LOOP:
 	switch e.Type {
 	case stream.EventQuery:
-		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
-			if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
-				h.Rr.ColValues = make([][]driver.Value, 0)
-				h.checkRunOrNot(e)
-				if !h.rrNeedReplay {
-					return nil
-				}
-				err = h.execute(ctx, e.Query)
-				h.needCompareRes = true
-			}
-		} else {
-			h.Rr.ColValues = make([][]driver.Value, 0)
-			err = h.execute(ctx, e.Query)
-			h.needCompareExecTime = true
-		}
-	case stream.EventStmtPrepare:
-		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
-			if h.fsm.IsSelectStmtOrSelectPrepare(e.Query) {
-				err = h.stmtPrepare(ctx, e.StmtID, e.Query)
-			}
-		} else {
-			err = h.stmtPrepare(ctx, e.StmtID, e.Query)
-		}
+		h.Rr.ColValues = make([][]driver.Value, 0)
+		err = h.execute(ctx, e.Query)
 
+	case stream.EventStmtPrepare:
+		err = h.stmtPrepare(ctx, e.StmtID, e.Query)
 		if err != nil {
 			if mysqlError, ok := err.(*mysql.MySQLError); ok {
 				logstr := fmt.Sprintf("prepare statment exec fail ,%s , %d ,%s ",
@@ -595,33 +479,17 @@ LOOP:
 				h.Rr.ErrNO = 20000
 				h.Rr.ErrDesc = "exec sql fail and coverted to mysql errorstruct err"
 			}
-
 		}
 	case stream.EventStmtExecute:
-		if h.fsm.IsSelectStmtOrSelectPrepare(h.filterStr) {
-			_, ok := h.stmts[e.StmtID]
-			if ok {
-				h.Rr.ColValues = make([][]driver.Value, 0)
-				h.checkRunOrNot(e)
-				if !h.rrNeedReplay {
-					return nil
-				}
-				err = h.stmtExecute(ctx, e.StmtID, e.Params)
-				h.needCompareRes = true
-			}
+		_, ok := h.stmts[e.StmtID]
+		if ok {
+			h.Rr.ColValues = make([][]driver.Value, 0)
+			err = h.stmtExecute(ctx, e.StmtID, e.Params)
 		} else {
-			_, ok := h.stmts[e.StmtID]
-			if ok {
-				h.Rr.ColValues = make([][]driver.Value, 0)
-				err = h.stmtExecute(ctx, e.StmtID, e.Params)
-				h.needCompareExecTime = true
-			} else {
-				err := new(mysql.MySQLError)
-				err.Number = 10000
-				err.Message = fmt.Sprintf("%v is not exist , maybe prepare fail", e.StmtID)
-				h.needCompareExecTime = true
-				return err
-			}
+			err := new(mysql.MySQLError)
+			err.Number = 10000
+			err.Message = fmt.Sprintf("%v is not exist , maybe prepare fail", e.StmtID)
+			return err
 		}
 	case stream.EventStmtClose:
 		h.stmtClose(e.StmtID)
@@ -902,7 +770,24 @@ func (h *replayEventHandler) ReadRowValues(f *sql.Rows) {
 	rf := foo
 	rf = reflect.NewAt(rf.Type(), unsafe.Pointer(rf.UnsafeAddr())).Elem()
 	z := rf.Interface().([]driver.Value)
-	h.Rr.ColValues = append(h.Rr.ColValues, z)
+	rr :=make([]driver.Value,0,len(z))
+	var err error
+	for i:= range z {
+		if z[i] ==nil{
+			rr=append(rr,nil)
+			continue
+		}
+		var a string
+		err = stream.ConvertAssignRows(z[i],&a)
+		if err ==nil{
+			rr=append(rr,a)
+		} else{
+			h.log.Warn("get row values fail , covert column value to string fail ,"+err.Error())
+		}
+	}
+	if err == nil{
+		h.Rr.ColValues = append(h.Rr.ColValues, rr)
+	}
 }
 
 /*type textDumpHandler struct {

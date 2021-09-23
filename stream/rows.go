@@ -270,7 +270,8 @@ func (rows *textRows) readRow(dest []driver.Value) error {
 
 	for i := range dest {
 		// Read bytes and convert to string
-		dest[i], isNull, n, err = readLengthEncodedString(data[pos:])
+		var a = string(data[pos:])
+		dest[i], isNull, n, err = readLengthEncodedString([]byte(a))
 		pos += n
 
 		if err != nil {
@@ -326,6 +327,7 @@ func (rows *binaryRows) readRow(dest []driver.Value) error {
 		//rows.mc = nil
 
 		// Error otherwise
+		//fmt.Println(string(data))
 		return fsm.handleErrorPacket(data)
 	}
 
@@ -341,6 +343,7 @@ func (rows *binaryRows) readRow(dest []driver.Value) error {
 			continue
 		}
 
+		//fmt.Println(rows.rs.columns[i].fieldType)
 		// Convert to byte-coded string
 		switch rows.rs.columns[i].fieldType {
 		case fieldTypeNULL:
@@ -367,35 +370,39 @@ func (rows *binaryRows) readRow(dest []driver.Value) error {
 			continue
 
 		case fieldTypeInt24, fieldTypeLong:
+			var a string = string(data[pos : pos+4])
 			if rows.rs.columns[i].flags&flagUnsigned != 0 {
-				dest[i] = int64(binary.LittleEndian.Uint32(data[pos : pos+4]))
+				dest[i] = int64(binary.LittleEndian.Uint32([]byte(a)))
 			} else {
-				dest[i] = int64(int32(binary.LittleEndian.Uint32(data[pos : pos+4])))
+				dest[i] = int64(int32(binary.LittleEndian.Uint32([]byte(a))))
 			}
 			pos += 4
 			continue
 
 		case fieldTypeLongLong:
+			var a string =string(data[pos : pos+8])
 			if rows.rs.columns[i].flags&flagUnsigned != 0 {
-				val := binary.LittleEndian.Uint64(data[pos : pos+8])
+				val := binary.LittleEndian.Uint64([]byte(a))
 				if val > math.MaxInt64 {
 					dest[i] = uint64ToString(val)
 				} else {
 					dest[i] = int64(val)
 				}
 			} else {
-				dest[i] = int64(binary.LittleEndian.Uint64(data[pos : pos+8]))
+				dest[i] = int64(binary.LittleEndian.Uint64([]byte(a)))
 			}
 			pos += 8
 			continue
 
 		case fieldTypeFloat:
-			dest[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[pos : pos+4]))
+			var a string = string(data[pos : pos+4])
+			dest[i] = math.Float32frombits(binary.LittleEndian.Uint32([]byte(a)))
 			pos += 4
 			continue
 
 		case fieldTypeDouble:
-			dest[i] = math.Float64frombits(binary.LittleEndian.Uint64(data[pos : pos+8]))
+			var a string = string(data[pos : pos+8])
+			dest[i] = math.Float64frombits(binary.LittleEndian.Uint64([]byte(a)))
 			pos += 8
 			continue
 
@@ -406,7 +413,9 @@ func (rows *binaryRows) readRow(dest []driver.Value) error {
 			fieldTypeVarString, fieldTypeString, fieldTypeGeometry, fieldTypeJSON:
 			var isNull bool
 			var n int
-			dest[i], isNull, n, err = readLengthEncodedString(data[pos:])
+			var a string=string(data[pos:])
+			dest[i], isNull, n, err = readLengthEncodedString([]byte(a))
+			//fmt.Println(dest[i],n,isNull,err)
 			pos += n
 			if err == nil {
 				if !isNull {
@@ -423,7 +432,8 @@ func (rows *binaryRows) readRow(dest []driver.Value) error {
 			fieldTypeTime,                         // Time [-][H]HH:MM:SS[.fractal]
 			fieldTypeTimestamp, fieldTypeDateTime: // Timestamp YYYY-MM-DD HH:MM:SS[.fractal]
 
-			num, isNull, n := readLengthEncodedInteger(data[pos:])
+			var a string = string(data[pos:])
+			num, isNull, n := readLengthEncodedInteger([]byte(a))
 			pos += n
 
 			switch {
@@ -444,9 +454,11 @@ func (rows *binaryRows) readRow(dest []driver.Value) error {
 						rows.rs.columns[i].decimals,
 					)
 				}
-				dest[i], err = formatBinaryTime(data[pos:pos+int(num)], dstlen)
+				var as string = string(data[pos:pos+int(num)])
+				dest[i], err = formatBinaryTime([]byte(as), dstlen)
 			case rows.fsm.pr.parseTime:
-				dest[i], err = parseBinaryDateTime(num, data[pos:], time.UTC)
+				var as string = string(data[pos:])
+				dest[i], err = parseBinaryDateTime(num, []byte(as), time.UTC)
 			default:
 				var dstlen uint8
 				if rows.rs.columns[i].fieldType == fieldTypeDate {
@@ -464,7 +476,8 @@ func (rows *binaryRows) readRow(dest []driver.Value) error {
 						)
 					}
 				}
-				dest[i], err = formatBinaryDateTime(data[pos:pos+int(num)], dstlen)
+				var as string = string(data[pos:pos+int(num)])
+				dest[i], err = formatBinaryDateTime([]byte(as), dstlen)
 			}
 
 			if err == nil {

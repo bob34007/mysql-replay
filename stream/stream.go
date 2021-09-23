@@ -225,6 +225,7 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 }
 
 func (s *mysqlStream) ReassemblyComplete(ac reassembly.AssemblerContext) bool {
+	s.log.Info("read packet complete")
 	close(s.ch)
 	if !s.opts.Synchronized {
 		<-s.done
