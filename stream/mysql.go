@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -1751,15 +1752,117 @@ func (fsm *MySQLFSM) setBucketNum(execTime uint64, serverType int8) {
 
 }
 
+func (fsm *MySQLFSM) CovertResToStr(v [][]driver.Value) ([][]string,error) {
+	resSet := make([][]string,0)
+	for a :=range v{
+		rowStr := make([]string,0)
+		for b :=range v[a] {
+			var c string
+			if v[a][b] == nil{
+				//pay attention on the following logic
+				//If driver.Value is nil, we convert it to a string of length 0,
+				//but then we can't compare nil to a string of length 0
+				c = ""
+			}
+			err := convertAssignRows(&c, v[a][b])
+			if err !=nil{
+				fsm.log.Warn("convert driver.Value to string fail , "+ err.Error())
+				return nil ,err
+			} else {
+				rowStr=append(rowStr,c)
+			}
+		}
+		resSet = append(resSet,rowStr)
+	}
+	return resSet,nil
+}
+
+func (fsm *MySQLFSM) SortRes (res [][]string){
+	var less =func(i,j int ) bool{
+		if res[i][0] == ""{
+			return true
+		}
+		if res[j][0] ==""{
+			return false
+		}
+		if res[i][0] < res[i][0]{
+			return true
+		}
+		return false
+	}
+	sort.Slice(res,less)
+}
+func (fsm *MySQLFSM) CompareRowRes(a,b[]string)(string,bool){
+	if len(a) != len(b){
+		return "",false
+	}
+	for i:= range a{
+		if a[i] != b[i]{
+			return "",false
+		}
+	}
+	return "",true
+}
+
+func (fsm *MySQLFSM) CompareQueryRes(a,b [][]string) (string,bool){
+	//result len equal is compare before ,so here ignore
+	var needComplexCompare =false
+	for i := range a{
+		_,e := fsm.CompareRowRes(a[i],b[i])
+		if e ==false {
+			needComplexCompare=true
+			break
+		}
+	}
+	var rangeAInB = false
+	var rangeBInA = false
+	if needComplexCompare  {
+		for i:= range a {
+			for j:=range b{
+				_,e :=fsm.CompareRowRes(a[i],b[j])
+				if !e {
+					continue
+				}else{
+					rangeAInB=true
+					break
+				}
+			}
+			if !rangeAInB{
+				return "",false
+			} else{
+				rangeAInB=false
+			}
+		}
+
+		for i:= range b {
+			for j:=range a{
+				_,e :=fsm.CompareRowRes(b[i],a[j])
+				if !e {
+					continue
+				}else{
+					rangeBInA=true
+					break
+				}
+			}
+			if !rangeBInA{
+				return "",false
+			} else{
+				rangeBInA=false
+			}
+		}
+	}
+	return "",true
+}
+
+
 //compare result from packet and result from tidb server
 // errcode 1: errcode not equal
 // errcode 2: exec time difference is doubled
 // errcode 3: result rownum is not equal
 // errcode 4: row detail is not equal
-func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
+func (fsm *MySQLFSM) CompareRes(pr *PacketRes,rr *ReplayRes) *SqlCompareRes {
 
 	res := new(SqlCompareRes)
-	pr := fsm.pr
 	res.Sql = rr.SqlStatment
 	res.Values = rr.Values
 	//var err error
@@ -1904,107 +2007,4 @@ func (fsm *MySQLFSM) CompareRes(rr *ReplayRes) *SqlCompareRes {
 	return res
 }
 
-/*type SqlCompareExecTimeRes struct {
-	Sql     string `json:"sql"`
-	ErrCode int    `json:"errcode"`
-	ErrDesc string `json:"errdesc"`
-}
 
-//compare result from packet and result from tidb server
-// errcode 1: errcode not equal and not dead lock or lock wait time out or duplicate key
-// errcode 2: exec time difference is doubled
-func (fsm *MySQLFSM) CompareExecTime(rr *ReplayRes) *SqlCompareExecTimeRes {
-
-	var prSqlExecTime uint64
-	var rrSqlExecTime uint64
-	res := new(SqlCompareExecTimeRes)
-	pr := fsm.pr
-	res.Sql = rr.SqlStatment
-	fsm.execSqlNum++
-	if pr.sqlEndTime <= pr.sqlBeginTime {
-		prSqlExecTime = 0
-	} else {
-		prSqlExecTime = pr.sqlEndTime - pr.sqlBeginTime
-	}
-	fsm.prExecTimeCount += uint64(prSqlExecTime)
-	if fsm.prMaxExecTime < uint64(prSqlExecTime) {
-		fsm.prMaxExecTime = uint64(prSqlExecTime)
-	}
-	if fsm.prMinExecTime > uint64(prSqlExecTime) {
-		fsm.prMinExecTime = uint64(prSqlExecTime)
-	}
-	if rr.SqlEndTime <= rr.SqlBeginTime {
-		rrSqlExecTime = 0
-	} else {
-		rrSqlExecTime = rr.SqlEndTime - rr.SqlBeginTime
-	}
-	fsm.rrExecTimeCount += uint64(rrSqlExecTime)
-	if fsm.rrMaxExecTime < uint64(rrSqlExecTime) {
-		fsm.rrMaxExecTime = uint64(rrSqlExecTime)
-	}
-	if fsm.rrMinExecTime > uint64(rrSqlExecTime) {
-		fsm.rrMinExecTime = uint64(rrSqlExecTime)
-	}
-
-	fsm.setBucketNum(rrSqlExecTime, 1)
-	fsm.setBucketNum(prSqlExecTime, 0)
-
-	if rr.ErrNO != 0 {
-		fsm.rrExecFailCount++
-		//fmt.Println(res.Sql, rr.ErrNO)
-	} else {
-		fsm.rrExecSuccCount++
-	}
-
-	if pr.errNo != 0 {
-		fsm.prExecFailCount++
-	} else {
-		fsm.prExecSuccCount++
-	}
-
-	if fsm.execSqlNum/10 == 0 {
-		defer fsm.AddStatis()
-	}
-
-	//fmt.Println(rr.ErrNO, pr.errNo, rr.SqlStatment)
-
-	//compare errcode
-	if rr.ErrNO != pr.errNo {
-		//ignore errcodes list
-		//1032:HA_ERR_KEY_NOT_FOUND
-		//1062:ER_DUP_KEY
-		//1025:ER_LOCK_WAIT_TIMEOUT
-		//1213:ER_LOCK_DEADLOCK
-		if rr.ErrNO != 1032 && rr.ErrNO != 1062 &&
-			rr.ErrNO != 1025 && rr.ErrNO != 1213 {
-			res.ErrCode = 1
-			res.ErrDesc = fmt.Sprintf("%v-%v", pr.errNo, rr.ErrNO)
-			fsm.execErrNoNotEqual++
-			fsm.execFailNum++
-			return res
-		} else {
-			fsm.log.Info(fmt.Sprintf("%s:%v-%v", res.Sql, pr.errNo, rr.ErrNO))
-		}
-	}
-
-	//compare exec time
-
-	if rrSqlExecTime > (5 * prSqlExecTime) {
-		//From http://en.wikipedia.org/wiki/Order_of_magnitude: "We say two
-		//numbers have the same order of magnitude of a number if the big
-		//one divided by the little one is less than 10. For example, 23 and
-		//82 have the same order of magnitude, but 23 and 820 do not."
-		res.ErrCode = 2
-		res.ErrDesc = fmt.Sprintf("%v us-%v us",
-			prSqlExecTime,
-			rrSqlExecTime)
-		fsm.execFailNum++
-		fsm.execTimeNotEqual++
-		return res
-	}
-
-	res.ErrCode = 0
-	fsm.execSuccNum++
-
-	return res
-}*/

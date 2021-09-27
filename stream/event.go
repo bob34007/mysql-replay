@@ -28,6 +28,9 @@ type MySQLEvent struct {
 	DB     string        `json:"db,omitempty"`
 	Query  string        `json:"query,omitempty"`
 	Fsm    *MySQLFSM
+	Pr     *PacketRes
+	Rr     *ReplayRes
+	//Logger *zap.Logger
 }
 
 func (event *MySQLEvent) Reset(params []interface{}) *MySQLEvent {
@@ -38,6 +41,19 @@ func (event *MySQLEvent) Reset(params []interface{}) *MySQLEvent {
 	event.DB = ""
 	event.Query = ""
 	return event
+}
+
+func (event *MySQLEvent)InitRr(){
+	rr := event.Rr
+	rr.ErrNO = 0
+	rr.ErrDesc = ""
+	rr.Values = rr.Values[0:0]
+	rr.ColumnNum = 0
+	rr.ColNames = rr.ColNames[0:0]
+	rr.ColValues = rr.ColValues[0:0][0:0]
+	rr.SqlStatment = ""
+	rr.SqlBeginTime = 0
+	rr.SqlEndTime = 0
 }
 
 func (event *MySQLEvent) String() string {
@@ -415,6 +431,8 @@ func (h *eventHandler) OnPacket(pkt MySQLPacket) {
 	default:
 		return
 	}
+	e.Pr = h.fsm.pr
+	h.fsm.pr = nil
 	h.impl.OnEvent(e)
 }
 
