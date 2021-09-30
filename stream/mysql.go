@@ -1873,7 +1873,7 @@ func (fsm *MySQLFSM) CompareRes(pr *PacketRes,rr *ReplayRes) *SqlCompareRes {
 	} else {
 		prSqlExecTime = 0
 	}
-	fsm.prExecTimeCount += uint64(prSqlExecTime)
+
 
 	var rrSqlExecTime uint64
 	if rr.SqlBeginTime < rr.SqlEndTime {
