@@ -3,13 +3,14 @@ package stream
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/agiledragon/gomonkey"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"math"
 	"reflect"
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestEventCodec(t *testing.T) {
@@ -211,3 +212,407 @@ func BenchmarkScanEventStmtExecuteJson(b *testing.B) {
 		json.Unmarshal(raw, &event)
 	}
 }
+
+func TestStream_ParsePacket_EventQuery(t *testing.T){
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+
+	query := "select * from test.test"
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches2.Reset()
+
+	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
+		func  (_ *MySQLFSM) int{
+			return StateComQuery2
+		})
+	defer patches3.Reset()
+
+	patches4 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Query",
+		func  (_ *MySQLFSM) string{
+			return query
+		})
+	defer patches4.Reset()
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Equal(e.Type ,EventQuery)
+	ast.Equal(e.Query,query)
+
+}
+
+func TestStream_ParsePacket_EventStmtExecute(t *testing.T){
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+	stmt:=new(Stmt)
+	stmt.ID=10
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches2.Reset()
+
+	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
+		func  (_ *MySQLFSM) int{
+			return StateComStmtExecute2
+		})
+	defer patches3.Reset()
+
+	patches4 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Stmt",
+		func  (_ *MySQLFSM) Stmt{
+			return *stmt
+		})
+	defer patches4.Reset()
+
+	patches5 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "StmtParams",
+		func  (_ *MySQLFSM)  []interface{}{
+			return nil
+		})
+	defer patches5.Reset()
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Equal(e.Type ,EventStmtExecute)
+	ast.Equal(e.StmtID,uint64(stmt.ID))
+	ast.Nil(e.Params)
+
+}
+
+func TestStream_ParsePacket_StateComStmtPrepare1(t *testing.T){
+	query:="select * from test.test"
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+	stmt:=new(Stmt)
+	stmt.ID=10
+	stmt.Query=query
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches2.Reset()
+
+	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
+		func  (_ *MySQLFSM) int{
+			return StateComStmtPrepare1
+		})
+	defer patches3.Reset()
+
+	patches4 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Stmt",
+		func  (_ *MySQLFSM) Stmt{
+			return *stmt
+		})
+	defer patches4.Reset()
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Equal(e.Type ,EventStmtPrepare)
+	ast.Equal(e.StmtID,uint64(stmt.ID))
+	ast.Equal(e.Query ,query)
+
+}
+
+func TestStream_ParsePacket_StateComStmtClose(t *testing.T){
+
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+	stmt:=new(Stmt)
+	stmt.ID=10
+
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches2.Reset()
+
+	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
+		func  (_ *MySQLFSM) int{
+			return StateComStmtClose
+		})
+	defer patches3.Reset()
+
+	patches4 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Stmt",
+		func  (_ *MySQLFSM) Stmt{
+			return *stmt
+		})
+	defer patches4.Reset()
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Equal(e.Type ,EventStmtClose)
+	ast.Equal(e.StmtID,uint64(stmt.ID))
+
+}
+
+func TestStream_ParsePacket_StateHandshake1(t *testing.T){
+
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+	db:="test"
+
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches2.Reset()
+
+	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
+		func  (_ *MySQLFSM) int{
+			return StateHandshake1
+		})
+	defer patches3.Reset()
+
+	patches4 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Schema",
+		func  (_ *MySQLFSM) string{
+			return db
+		})
+	defer patches4.Reset()
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Equal(e.Type ,EventHandshake)
+	ast.Equal(e.DB,db)
+
+}
+
+func TestStream_ParsePacket_StateComQuit(t *testing.T){
+
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches2.Reset()
+
+	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
+		func  (_ *MySQLFSM) int{
+			return StateComQuit
+		})
+	defer patches3.Reset()
+
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Equal(e.Type ,EventQuit)
+
+
+}
+
+func TestStream_ParsePacket_100(t *testing.T){
+
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+
+
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches2.Reset()
+
+	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
+		func  (_ *MySQLFSM) int{
+			return 100
+		})
+	defer patches3.Reset()
+
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Nil(e)
+
+}
+
+func TestStream_ParsePacket_NotReady(t *testing.T){
+
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+
+
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return false
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches2.Reset()
+
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Nil(e)
+
+}
+
+func TestStream_ParsePacket_NotChange(t *testing.T){
+
+	pkt := new(MySQLPacket)
+	h:=new(eventHandler)
+	h.fsm = new(MySQLFSM)
+	pkt.Time= time.Now()
+
+
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Handle",
+		func  (_ *MySQLFSM,pkt MySQLPacket) {
+			return
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Ready",
+		func  (_ *MySQLFSM) bool{
+			return true
+		})
+	defer patches1.Reset()
+
+	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "Changed",
+		func  (_ *MySQLFSM) bool{
+			return false
+		})
+	defer patches2.Reset()
+
+
+	e := h.ParsePacket(*pkt)
+
+	ast := assert.New(t)
+
+	ast.Nil(e)
+
+}
+

@@ -391,14 +391,12 @@ func (h *eventHandler) Accept(ci gopacket.CaptureInfo, dir reassembly.TCPFlowDir
 	return true
 }
 
-//deal  packet from pacp file
-func (h *eventHandler) OnPacket(pkt MySQLPacket) {
+func (h *eventHandler)ParsePacket(pkt MySQLPacket) *MySQLEvent{
 	h.fsm.Handle(pkt)
 	if !h.fsm.Ready() || !h.fsm.Changed() {
-		return
+		return nil
 	}
-	//e := MySQLEvent{Time: pkt.Time.UnixNano() / int64(time.Millisecond)}
-	e := MySQLEvent{Time: pkt.Time.UnixNano()}
+	e := &MySQLEvent{Time: pkt.Time.UnixNano()}
 	e.Fsm = h.fsm
 	switch h.fsm.State() {
 	case StateComQuery2:
@@ -429,14 +427,43 @@ func (h *eventHandler) OnPacket(pkt MySQLPacket) {
 	case StateComQuit:
 		e.Type = EventQuit
 	default:
-		return
+		return nil
 	}
-	e.Pr = h.fsm.pr
-	h.fsm.pr = nil
-	h.impl.OnEvent(e)
+	return e
+}
+
+
+func (h *eventHandler)AsyncParsePacket(){
+	for {
+		pkt, ok := <-h.fsm.c
+		if ok {
+			e := h.ParsePacket(pkt)
+			if e==nil{
+				continue
+			}
+			e.Pr = h.fsm.pr
+			h.fsm.pr = nil
+			h.impl.OnEvent(*e)
+		}else {
+			h.fsm.wg.Done()
+			return
+		}
+	}
+}
+
+
+//deal  packet from pacp file
+func (h *eventHandler) OnPacket(pkt MySQLPacket) {
+	if !h.fsm.initThreadFinish{
+		h.fsm.initThreadFinish = true
+		h.fsm.wg.Add(1)
+		go h.AsyncParsePacket()
+	}
+	h.fsm.c<- pkt
 }
 
 func (h *eventHandler) OnClose() {
-
+	close(h.fsm.c)
+	h.fsm.wg.Wait()
 	h.impl.OnClose()
 }

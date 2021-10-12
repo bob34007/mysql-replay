@@ -5,14 +5,14 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
-	"github.com/bobguo/mysql-replay/util"
 	"os"
 	"reflect"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/bobguo/mysql-replay/stats"
+	"github.com/bobguo/mysql-replay/util"
+
 	"github.com/bobguo/mysql-replay/stream"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
@@ -27,10 +27,49 @@ import (
 
 var ERRORTIMEOUT = errors.New("replay runtime out")
 
+func HandlePcapFile(name string, ts time.Time, rt int, ticker *time.Ticker, assembler *reassembly.Assembler) error {
+	var f *pcap.Handle
+	var err error
+	f, err = pcap.OpenOffline(name)
+	if err != nil {
+		return errors.Annotate(err, "open "+name)
+	}
+	defer f.Close()
+	//logger := zap.L().With(zap.String("conn", "compare"))
+	src := gopacket.NewPacketSource(f, f.LinkType())
+	for pkt := range src.Packets() {
+		layer := pkt.Layer(layers.LayerTypeTCP)
+		if layer == nil {
+			continue
+		}
+		tcp := layer.(*layers.TCP)
+		assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
+		if rt > 0 {
+			select {
+			case <-ticker.C:
+				if time.Since(ts).Seconds() > float64(rt*60) {
+					return ERRORTIMEOUT
+				}
+			default:
+				//
+			}
+		}
+	}
+	return nil
+}
+
+func NewWriteFile() *WriteFile{
+	wf :=new(WriteFile)
+	wf.ch =make(chan stream.MySQLEvent,10000)
+	var wg  sync.WaitGroup
+	wf.wg = &wg
+	wf.rrStartGoRuntine = false
+	return wf
+}
+
 func NewTextDumpReplayCommand() *cobra.Command {
 	//Replay sql from pcap files，and compare reslut from pcap file and
 	//replay server
-
 	var (
 		options   = stream.FactoryOptions{Synchronized: true}
 		dsn       string
@@ -49,7 +88,8 @@ func NewTextDumpReplayCommand() *cobra.Command {
 
 			ts := time.Now()
 			var ticker *time.Ticker
-			rt, MySQLConfig, err := util.CheckParamValid(runTime, dsn, outputDir)
+			rt, MySQLCfg, err := util.CheckParamValid(dsn, runTime, outputDir)
+			//fmt.Println(MySQLConfig)
 			if err != nil {
 				log.Error("parse param error , " + err.Error())
 				return nil
@@ -57,6 +97,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 
 			if rt > 0 {
 				ticker = time.NewTicker(3 * time.Second)
+				defer ticker.Stop()
 			}
 
 			var wg sync.WaitGroup
@@ -65,56 +106,27 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				fileName := conn.HashStr() + ":" + conn.SrcAddr()
 				f, err := util.OpenFile(outputDir, fileName)
 				if err != nil {
-					panic("create and open  file fail , " + outputDir + "/" + fileName)
+					panic("create and open  file fail , " + outputDir + "/" + fileName + err.Error())
 				}
 				return &replayEventHandler{
 					pconn:       conn,
 					log:         logger,
 					dsn:         dsn,
-					MySQLConfig: MySQLConfig,
+					MySQLConfig: MySQLCfg,
 					ctx:         context.Background(),
-					ch:          make(chan stream.MySQLEvent, 100),
+					ch:          make(chan stream.MySQLEvent, 10000),
 					wg:          &wg,
 					stmts:       make(map[uint64]statement),
 					file:        f,
+					wf  :       NewWriteFile(),
 				}
 			}, options)
 			pool := reassembly.NewStreamPool(factory)
 			assembler := reassembly.NewAssembler(pool)
-
-			handle := func(name string) error {
-				var f *pcap.Handle
-				f, err = pcap.OpenOffline(name)
-				if err != nil {
-					return errors.Annotate(err, "open "+name)
-				}
-				defer f.Close()
-				//logger := zap.L().With(zap.String("conn", "compare"))
-				src := gopacket.NewPacketSource(f, f.LinkType())
-				for pkt := range src.Packets() {
-					layer := pkt.Layer(layers.LayerTypeTCP)
-					if layer == nil {
-						continue
-					}
-					tcp := layer.(*layers.TCP)
-					assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
-					if rt > 0 {
-						select {
-						case <-ticker.C:
-							if time.Since(ts).Seconds() > float64(rt*60) {
-								return ERRORTIMEOUT
-							}
-						default:
-							//
-						}
-					}
-				}
-				return nil
-			}
-
 			for _, in := range args {
 				zap.L().Info("processing " + in)
-				err = handle(in)
+				//err = handle(in)
+				err = HandlePcapFile(in, ts, rt, ticker, assembler)
 				if err != nil && err != ERRORTIMEOUT {
 					return err
 				} else if err == ERRORTIMEOUT {
@@ -122,12 +134,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				}
 				assembler.FlushCloseOlderThan(factory.LastStreamTime().Add(-3 * time.Minute))
 			}
-
 			assembler.FlushAll()
-			if rt > 0 {
-				ticker.Stop()
-			}
-			StaticPrint()
 			log.Info("process end run at " + time.Now().String())
 			return nil
 		},
@@ -171,7 +178,52 @@ type replayEventHandler struct {
 	wg               *sync.WaitGroup
 	file             *os.File
 	//Rr           *stream.ReplayRes
+	wf             *WriteFile
 }
+
+type WriteFile struct {
+	ch chan stream.MySQLEvent
+	rrStartGoRuntine bool
+	wg  *sync.WaitGroup
+}
+
+func (h *replayEventHandler) DoWriteResToFile(){
+	for {
+		e ,ok := <-h.wf.ch
+		if ok {
+			res ,err:= stream.NewResForWriteFile(e.Pr, e.Rr, &e, h.file)
+			if err !=nil{
+				if err != nil {
+					h.log.Warn("new write compare result to file struct fail , " + err.Error())
+				}
+			} else {
+				_, err = res.WriteResToFile()
+				if err != nil {
+					h.log.Warn("write compare result to file fail , " + err.Error())
+				}
+			}
+
+		}else {
+			h.wf.wg.Done()
+			h.log.Info("chan close ,func exit ")
+			return
+		}
+
+	}
+
+}
+
+func (h *replayEventHandler) AsyncWriteResToFile(e stream.MySQLEvent){
+	if h.wf.rrStartGoRuntine == false {
+		h.wf.wg.Add(1)
+		go h.DoWriteResToFile()
+		h.wf.rrStartGoRuntine = true
+	} else {
+		h.wf.ch <- e
+	}
+
+}
+
 
 func (h *replayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.WaitGroup) {
 	defer func() {
@@ -194,28 +246,24 @@ func (h *replayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.Wai
 					e.Rr.ErrNO = mysqlError.Number
 					e.Rr.ErrDesc = mysqlError.Message
 				} else {
-					//fmt.Println(err.Error(), ok)
 					e.Rr.ErrNO = 20000
-					e.Rr.ErrDesc = "exec sql fail and coverted to mysql errorstruct err"
+					e.Rr.ErrDesc = "Failed to execute SQL and failed to convert to mysql error"
 				}
 			}
-
-			res :=stream.NewResForWriteFile(e.Pr,e.Rr,&e,h.file)
-			_,err = res.WriteResToFile()
-			if err!=nil {
-				h.log.Warn("write compare result to file fail , " +err.Error() )
-			}
-			/*
-				res := h.fsm.CompareRes(e.Pr, e.Rr)
-				if res.ErrCode != 0 {
-					logstr, err := json.Marshal(res)
-					if err != nil {
-						h.log.Warn("compare result marshal to json error " + err.Error())
-						continue
-					}
-					h.log.Info(string(logstr))
+			h.AsyncWriteResToFile(e)
+/*
+			res ,err:= stream.NewResForWriteFile(e.Pr, e.Rr, &e, h.file)
+			if err !=nil{
+				if err != nil {
+					h.log.Warn("write compare result to file fail , " + err.Error())
 				}
-			*/
+			} else {
+				_, err = res.WriteResToFile()
+				if err != nil {
+					h.log.Warn("write compare result to file fail , " + err.Error())
+				}
+			}*
+ */
 		} else {
 			wg.Done()
 			h.log.Info("chan close ,func exit ")
@@ -223,7 +271,7 @@ func (h *replayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.Wai
 		}
 
 	}
-	//	return
+
 }
 
 func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
@@ -232,7 +280,6 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 
 	e.Rr = new(stream.ReplayRes)
 	e.InitRr()
-	//e.Logger=h.log
 	if h.rrStartGoRuntine == false {
 		h.wg.Add(1)
 		go h.ReplayEvent(h.ch, h.wg)
@@ -324,14 +371,19 @@ func StaticPrint() {
 
 func (h *replayEventHandler) OnClose() {
 	//h.StaticPrint()
+	//wait replay goroutine end
 	close(h.ch)
 	h.wg.Wait()
-	err:=h.file.Close()
-	if err!=nil{
-		h.log.Warn("close file fail , " + h.file.Name()+" " + err.Error())
+	//wait write goroutine end
+	close(h.wf.ch)
+	h.wf.wg.Wait()
+	err := h.file.Sync()
+	if err != nil {
+		h.log.Warn("sync file fail , " + h.file.Name() + " " + err.Error())
 	}
-	if h.fsm != nil {
-		h.fsm.AddStatis()
+	err = h.file.Close()
+	if err != nil {
+		h.log.Warn("close file fail , " + h.file.Name() + " " + err.Error())
 	}
 	h.quit(false)
 }
@@ -347,6 +399,7 @@ LOOP:
 		var ok bool
 	RETRYCOMQUERY:
 		err = h.execute(ctx, e.Query, e)
+		//fmt.Println(err)
 		if err != nil {
 			if mysqlError, ok = err.(*mysql.MySQLError); ok {
 				//If TiDB thrown 1205: Lock wait timeout exceeded; try restarting transaction
@@ -427,7 +480,6 @@ func (h *replayEventHandler) open(schema string) (*sql.DB, error) {
 		cfg = cfg.Clone()
 		cfg.DBName = schema
 	}
-
 	return sql.Open("mysql", cfg.FormatDSN())
 }
 
@@ -454,6 +506,7 @@ func (h *replayEventHandler) getConn(ctx context.Context) (*sql.Conn, error) {
 	var err error
 	if h.pool == nil {
 		h.pool, err = h.open(h.schema)
+		//fmt.Println(477,h.pool,h.schema,err)
 		if err != nil {
 			return nil, err
 		}
@@ -461,9 +514,10 @@ func (h *replayEventHandler) getConn(ctx context.Context) (*sql.Conn, error) {
 	if h.conn == nil {
 		h.conn, err = h.pool.Conn(ctx)
 		if err != nil {
+			//fmt.Println(485,err)
 			return nil, err
 		}
-		stats.Add(stats.Connections, 1)
+		//stats.Add(stats.Connections, 1)
 	}
 	return h.conn, nil
 }
@@ -488,7 +542,7 @@ func (h *replayEventHandler) quit(reconnect bool) {
 			h.log.Warn("close conn fail ," + err.Error())
 		}
 		h.conn = nil
-		stats.Add(stats.Connections, -1)
+		//stats.Add(stats.Connections, -1)
 	}
 	if h.pool != nil {
 		if err := h.pool.Close(); err != nil {
@@ -501,13 +555,15 @@ func (h *replayEventHandler) quit(reconnect bool) {
 //Execute SQL on replay Server
 func (h *replayEventHandler) execute(ctx context.Context, query string, e *stream.MySQLEvent) error {
 	conn, err := h.getConn(ctx)
+	//fmt.Println(526,err)
 	if err != nil {
 		return err
 	}
-	stats.Add(stats.Queries, 1)
-	stats.Add(stats.ConnRunning, 1)
+	//stats.Add(stats.Queries, 1)
+	//stats.Add(stats.ConnRunning, 1)
 	e.Rr.SqlBeginTime = uint64(time.Now().UnixNano())
 	e.Rr.SqlStatment = query
+	//fmt.Println(query)
 	rows, err := conn.QueryContext(ctx, query)
 	e.Rr.SqlEndTime = uint64(time.Now().UnixNano())
 	defer func() {
@@ -517,10 +573,9 @@ func (h *replayEventHandler) execute(ctx context.Context, query string, e *strea
 			}
 		}
 	}()
-	stats.Add(stats.ConnRunning, -1)
+	//stats.Add(stats.ConnRunning, -1)
 	if err != nil {
-		//h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
-		stats.Add(stats.FailedQueries, 1)
+		//stats.Add(stats.FailedQueries, 1)
 		return err
 	}
 	for rows.Next() {
@@ -545,10 +600,10 @@ func (h *replayEventHandler) stmtPrepare(ctx context.Context, id uint64, query s
 	if err != nil {
 		return err
 	}
-	stats.Add(stats.StmtPrepares, 1)
+	//stats.Add(stats.StmtPrepares, 1)
 	stmt.handle, err = conn.PrepareContext(ctx, stmt.query)
 	if err != nil {
-		stats.Add(stats.FailedStmtPrepares, 1)
+		//stats.Add(stats.FailedStmtPrepares, 1)
 		return err
 	}
 	h.stmts[id] = stmt
@@ -576,8 +631,10 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 
 	e.Rr.SqlStatment = h.getQuery(stmt)
 	e.Rr.Values = params
-	stats.Add(stats.StmtExecutes, 1)
-	stats.Add(stats.ConnRunning, 1)
+
+	//fmt.Println(e.Rr.SqlStatment,e.Rr.Values)
+	//stats.Add(stats.StmtExecutes, 1)
+	//stats.Add(stats.ConnRunning, 1)
 	e.Rr.SqlBeginTime = uint64(time.Now().UnixNano())
 	rows, err := stmt.QueryContext(ctx, params...)
 	e.Rr.SqlEndTime = uint64(time.Now().UnixNano())
@@ -588,13 +645,11 @@ func (h *replayEventHandler) stmtExecute(ctx context.Context, id uint64, params 
 			}
 		}
 	}()
-	stats.Add(stats.ConnRunning, -1)
+	//stats.Add(stats.ConnRunning, -1)
 	if err != nil {
-		//h.Rr.SqlEndTime = time.Now().UnixNano() / 1000000
-		stats.Add(stats.FailedStmtExecutes, 1)
+		//stats.Add(stats.FailedStmtExecutes, 1)
 		return err
 	}
-	//h.Rr.ColNames, _ = rows.Columns()
 	for rows.Next() {
 		h.ReadRowValues(rows, e)
 	}

@@ -159,6 +159,9 @@ func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
 		stmts:   map[uint32]Stmt{},
 		params:  []interface{}{},
 		packets: []MySQLPacket{},
+		initThreadFinish: false,
+		c : make(chan MySQLPacket ,10000),
+
 	}
 }
 
@@ -236,8 +239,14 @@ type FSMStatic struct {
 	rrMinExecTime      uint64
 }
 
+//Store network packet, parse SQL statement and result packet
 type MySQLFSM struct {
 	log *zap.Logger
+
+	//Used to parse message packets asynchronously
+	initThreadFinish bool
+	c  chan MySQLPacket
+	wg sync.WaitGroup
 
 	// state info
 	changed bool
@@ -1763,6 +1772,8 @@ func (fsm *MySQLFSM) CovertResToStr(v [][]driver.Value) ([][]string,error) {
 				//If driver.Value is nil, we convert it to a string of length 0,
 				//but then we can't compare nil to a string of length 0
 				c = ""
+				rowStr=append(rowStr,c)
+				continue
 			}
 			err := convertAssignRows(&c, v[a][b])
 			if err !=nil{

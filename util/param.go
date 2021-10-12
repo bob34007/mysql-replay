@@ -9,6 +9,7 @@ import (
 func CheckParamValid (dsn,runTime,outputDir string ) (int ,*mysql.Config,error){
 	var rt int
 	var err error
+	//fmt.Println(runTime)
 	if len(runTime) ==0{
 		err = errors.New("runTime len is zero")
 		return 0,nil,err

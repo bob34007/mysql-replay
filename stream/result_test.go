@@ -18,6 +18,7 @@ import (
 
 var pr *PacketRes
 var rr *ReplayRes
+var e *MySQLEvent
 
 func init() {
 	pr = new(PacketRes)
@@ -42,12 +43,14 @@ func init() {
 	rr.SqlBeginTime = uint64(time.Now().UnixNano())
 	rr.SqlEndTime = rr.SqlBeginTime
 
+	e = new(MySQLEvent)
+
 }
 
 func TestStream_NewResForWriteFile(t *testing.T) {
 
 	file := new(os.File)
-	rs := NewResForWriteFile(pr, rr, file)
+	rs ,_:= NewResForWriteFile(pr, rr, e,file)
 
 	ast := assert.New(t)
 
@@ -58,7 +61,7 @@ func TestStream_NewResForWriteFile(t *testing.T) {
 func TestStream_WriteResToFile_Succ(t *testing.T) {
 
 	file := new(os.File)
-	rs := NewResForWriteFile(pr, rr, file)
+	rs ,err:= NewResForWriteFile(pr, rr, e,file)
 
 	outputs := make([]gomonkey.OutputCell, 0)
 
@@ -93,11 +96,11 @@ func TestStream_WriteResToFile_Succ(t *testing.T) {
 func TestStream_WriteResToFile_Write_Len_Fail(t *testing.T) {
 
 	file := new(os.File)
-	rs := NewResForWriteFile(pr, rr, file)
+	rs ,err:= NewResForWriteFile(pr, rr,e, file)
 
 	outputs := make([]gomonkey.OutputCell, 0)
 
-	err := errors.New("no space left")
+	err = errors.New("no space left")
 
 	value1 := make([]interface{}, 0)
 	value1 = append(value1, err)
@@ -122,7 +125,7 @@ func TestStream_WriteResToFile_Write_Len_Fail(t *testing.T) {
 func TestStream_WriteResToFile_Write_Res_Fail(t *testing.T) {
 
 	file := new(os.File)
-	rs := NewResForWriteFile(pr, rr, file)
+	rs ,_:= NewResForWriteFile(pr, rr,e, file)
 
 	outputs := make([]gomonkey.OutputCell, 0)
 
@@ -158,7 +161,7 @@ func TestStream_WriteResToFile_Write_Res_Fail(t *testing.T) {
 func TestStream_WriteResToFile_Marshal_Fail(t *testing.T) {
 
 	file := new(os.File)
-	rs := NewResForWriteFile(pr, rr, file)
+	rs ,_:= NewResForWriteFile(pr, rr,e, file)
 
 	err := errors.New("format json fail")
 
@@ -177,7 +180,7 @@ func TestStream_WriteResToFile_Marshal_Fail(t *testing.T) {
 func TestStream_WriteData_Succ(t *testing.T) {
 
 	file := new(os.File)
-	rs := NewResForWriteFile(pr, rr, file)
+	rs ,err:= NewResForWriteFile(pr, rr,e, file)
 
 	patches := gomonkey.ApplyMethod(reflect.TypeOf(file), "Write",
 		func(_ *os.File, b []byte) (n int, err error) {
@@ -188,7 +191,7 @@ func TestStream_WriteData_Succ(t *testing.T) {
 	b := make([]byte, 0)
 	b = append(b, 'a', 'b', 'c')
 
-	err := rs.WriteData(b, 0)
+	err = rs.WriteData(b, 0)
 
 	ast := assert.New(t)
 
@@ -198,7 +201,7 @@ func TestStream_WriteData_Succ(t *testing.T) {
 func TestStream_WriteData_Fail(t *testing.T) {
 
 	file := new(os.File)
-	rs := NewResForWriteFile(pr, rr, file)
+	rs ,_:= NewResForWriteFile(pr, rr,e, file)
 
 	err1 := errors.New(" no space left ")
 
@@ -208,17 +211,6 @@ func TestStream_WriteData_Fail(t *testing.T) {
 		})
 	defer patches.Reset()
 
-	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(file), "Truncate",
-		func(_ *os.File, size int64) error {
-			return nil
-		})
-	defer patches1.Reset()
-
-	patches2 := gomonkey.ApplyMethod(reflect.TypeOf(file), "Seek",
-		func(_ *os.File, offset int64, whence int) (ret int64, err error) {
-			return 0, nil
-		})
-	defer patches2.Reset()
 
 	b := make([]byte, 0)
 	b = append(b, 'a', 'b', 'c')

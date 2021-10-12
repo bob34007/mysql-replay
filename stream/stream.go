@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/bobguo/mysql-replay/stats"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/reassembly"
@@ -102,7 +101,7 @@ func (f *mysqlStreamFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP
 	if ac != nil && f.ts.Sub(ac.GetCaptureInfo().Timestamp) < 0 {
 		f.ts = ac.GetCaptureInfo().Timestamp
 	}
-	stats.Add(stats.Streams, 1)
+	//stats.Add(stats.Streams, 1)
 	return &mysqlStream{
 		conn: conn,
 		log:  log,
@@ -210,7 +209,7 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 		pkt.Data = make([]byte, pkt.Len)
 		copy(pkt.Data, buf.Next(pkt.Len + 4)[4:])
 		cnt += 1
-		stats.Add(stats.Packets, 1)
+		//stats.Add(stats.Packets, 1)
 		if s.opts.Synchronized {
 			s.h.OnPacket(*pkt)
 		} else {
@@ -231,7 +230,7 @@ func (s *mysqlStream) ReassemblyComplete(ac reassembly.AssemblerContext) bool {
 		<-s.done
 	}
 	s.h.OnClose()
-	stats.Add(stats.Streams, -1)
+	//stats.Add(stats.Streams, -1)
 	return true
 }
 
