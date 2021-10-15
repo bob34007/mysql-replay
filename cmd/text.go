@@ -100,7 +100,6 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				defer ticker.Stop()
 			}
 
-			var wg sync.WaitGroup
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 				logger := conn.Logger("replay")
 				fileName := conn.HashStr() + ":" + conn.SrcAddr()
@@ -108,6 +107,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				if err != nil {
 					panic("create and open  file fail , " + outputDir + "/" + fileName + err.Error())
 				}
+				var wg sync.WaitGroup
 				return &replayEventHandler{
 					pconn:       conn,
 					log:         logger,
@@ -125,7 +125,6 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			assembler := reassembly.NewAssembler(pool)
 			for _, in := range args {
 				zap.L().Info("processing " + in)
-				//err = handle(in)
 				err = HandlePcapFile(in, ts, rt, ticker, assembler)
 				if err != nil && err != ERRORTIMEOUT {
 					return err
@@ -134,7 +133,9 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				}
 				assembler.FlushCloseOlderThan(factory.LastStreamTime().Add(-3 * time.Minute))
 			}
-			assembler.FlushAll()
+			log.Info("read packet end ,begin close all goroutine")
+			i := assembler.FlushAll()
+			log.Info(fmt.Sprintf("read packet end ,end close all goroutine , %v groutine",i))
 			log.Info("process end run at " + time.Now().String())
 			return nil
 		},
@@ -188,6 +189,8 @@ type WriteFile struct {
 }
 
 func (h *replayEventHandler) DoWriteResToFile(){
+
+	h.log.Info("thread begin to run for write " + h.file.Name())
 	for {
 		e ,ok := <-h.wf.ch
 		if ok {
@@ -205,6 +208,7 @@ func (h *replayEventHandler) DoWriteResToFile(){
 
 		}else {
 			h.wf.wg.Done()
+			h.log.Info("thread end to run for write " + h.file.Name())
 			h.log.Info("chan close ,func exit ")
 			return
 		}
@@ -218,9 +222,9 @@ func (h *replayEventHandler) AsyncWriteResToFile(e stream.MySQLEvent){
 		h.wf.wg.Add(1)
 		go h.DoWriteResToFile()
 		h.wf.rrStartGoRuntine = true
-	} else {
-		h.wf.ch <- e
 	}
+	h.wf.ch <- e
+
 
 }
 
@@ -232,6 +236,7 @@ func (h *replayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.Wai
 		}
 
 	}()
+	h.log.Info("thread begin to run for apply mysql event " + h.file.Name())
 	for {
 		e, ok := <-ch
 
@@ -251,25 +256,12 @@ func (h *replayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.Wai
 				}
 			}
 			h.AsyncWriteResToFile(e)
-/*
-			res ,err:= stream.NewResForWriteFile(e.Pr, e.Rr, &e, h.file)
-			if err !=nil{
-				if err != nil {
-					h.log.Warn("write compare result to file fail , " + err.Error())
-				}
-			} else {
-				_, err = res.WriteResToFile()
-				if err != nil {
-					h.log.Warn("write compare result to file fail , " + err.Error())
-				}
-			}*
- */
 		} else {
 			wg.Done()
+			h.log.Info("thread begin to run for apply mysql event " + h.file.Name())
 			h.log.Info("chan close ,func exit ")
 			return
 		}
-
 	}
 
 }
@@ -284,94 +276,13 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 		h.wg.Add(1)
 		go h.ReplayEvent(h.ch, h.wg)
 		h.rrStartGoRuntine = true
-	} else {
-		h.ch <- e
 	}
+	h.ch <- e
+
 }
 
-func StaticPrint() {
-	//print static message
-
-	stream.Sm.Lock()
-	defer stream.Sm.Unlock()
-	fmt.Println("-------compare result -------------")
-	fmt.Println("compare sql : ", stream.ExecSqlNum)
-	fmt.Print("compare succ :", stream.ExecSuccNum, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.ExecSuccNum*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Print("compare fail :", stream.ExecFailNum, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.ExecFailNum*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Print("exec errno fail :", stream.ExecErrNoNotEqual, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.ExecErrNoNotEqual*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Print("exec time fail :", stream.ExecTimeNotEqual, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.ExecTimeNotEqual*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Print("row count fail :", stream.RowCountNotequal, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.RowCountNotequal*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Print("row detail fail :", stream.RowDetailNotEqual, " ")
-	if stream.ExecSqlNum > 0 {
-		fmt.Print(stream.RowDetailNotEqual*100/stream.ExecSqlNum, "%")
-	}
-	fmt.Println()
-	fmt.Println("-------from packet -------------")
-	fmt.Println("exec succ sql count :", stream.PrExecSuccCount)
-	fmt.Println("exec fail sql count :", stream.PrExecFailCount)
-	fmt.Print("exec time :",
-		stream.PrExecTimeCount/uint64(time.Millisecond), "  ")
-	fmt.Println("reslut rows :", stream.PrExecRowCount)
-	if stream.ExecSqlNum > 0 {
-		fmt.Printf("avg exec  time: %.2f \n",
-			float64(stream.PrExecTimeCount)/float64(stream.ExecSqlNum)/float64(time.Millisecond))
-	}
-	fmt.Print("max exec time: ",
-		stream.PrMaxExecTime/uint64(time.Millisecond), "  ")
-	fmt.Println("min exec time: ", stream.PrMinExecTime/uint64(time.Millisecond))
-	fmt.Print("exec in 10ms: ", stream.PrExecTimeIn10ms, "  ")
-	fmt.Println("exec in 20ms: ", stream.PrExecTimeIn20ms)
-	fmt.Print("exec in 30ms: ", stream.PrExecTimeIn30ms, "  ")
-	fmt.Println("exec in 40ms: ", stream.PrExecTimeIn40ms)
-	fmt.Print("exec in 50ms: ", stream.PrExecTimeIn50ms, "  ")
-	fmt.Println("exec in 100ms: ", stream.PrExecTimeIn100ms)
-	fmt.Println("exec out 100ms: ", stream.PrExecTimeOut100ms)
-	fmt.Println("-------from replay server -------------")
-	fmt.Println("exec succ sql count :", stream.RrExecSuccCount)
-	fmt.Println("exec fail sql count :", stream.RrExecFailCount)
-	fmt.Print("exec time  :",
-		stream.RrExecTimeCount/uint64(time.Millisecond), "  ")
-	fmt.Println("reslut rows :", stream.RrExecRowCount)
-	if stream.ExecSqlNum > 0 {
-		fmt.Printf("avg exec  time: %.2f \n",
-			float64(stream.RrExecTimeCount)/float64(stream.ExecSqlNum)/float64(time.Millisecond))
-	}
-	fmt.Println()
-	fmt.Print("max exec time: ", stream.RrMaxExecTime/uint64(time.Millisecond), "  ")
-	fmt.Println("min exec time: ", stream.RrMinExecTime/uint64(time.Millisecond))
-	fmt.Print("exec in 10ms: ", stream.RrExecTimeIn10ms, "  ")
-	fmt.Println("exec in 20ms: ", stream.RrExecTimeIn20ms)
-	fmt.Print("exec in 30ms: ", stream.RrExecTimeIn30ms, "  ")
-	fmt.Println("exec in 40ms: ", stream.RrExecTimeIn40ms)
-	fmt.Print("exec in 50ms: ", stream.RrExecTimeIn50ms, "  ")
-	fmt.Println("exec in 100ms: ", stream.RrExecTimeIn100ms)
-	fmt.Println("exec out 100ms: ", stream.RrExecTimeOut100ms)
-	fmt.Println("-------compare result -------------")
-}
 
 func (h *replayEventHandler) OnClose() {
-	//h.StaticPrint()
-	//wait replay goroutine end
 	close(h.ch)
 	h.wg.Wait()
 	//wait write goroutine end
@@ -405,6 +316,7 @@ LOOP:
 				//If TiDB thrown 1205: Lock wait timeout exceeded; try restarting transaction
 				//we try again until execute success
 				if mysqlError.Number == 1205 {
+					h.log.Warn(fmt.Sprintf("replay sql with lock wait timeout , try again %v",mysqlError))
 					e.Rr.ColValues = e.Rr.ColValues[:0][:0]
 					goto RETRYCOMQUERY
 				}

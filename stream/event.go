@@ -434,6 +434,7 @@ func (h *eventHandler)ParsePacket(pkt MySQLPacket) *MySQLEvent{
 
 
 func (h *eventHandler)AsyncParsePacket(){
+	h.fsm.log.Info("thread begin to run for parse packet " + h.conn.HashStr())
 	for {
 		pkt, ok := <-h.fsm.c
 		if ok {
@@ -446,6 +447,7 @@ func (h *eventHandler)AsyncParsePacket(){
 			h.impl.OnEvent(*e)
 		}else {
 			h.fsm.wg.Done()
+			h.fsm.log.Info("thread end to run for parse packet " + h.conn.HashStr())
 			return
 		}
 	}

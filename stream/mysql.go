@@ -152,6 +152,7 @@ type Stmt struct {
 }
 
 func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
+	var wg sync.WaitGroup
 	return &MySQLFSM{
 		log:     log,
 		state:   StateInit,
@@ -161,7 +162,7 @@ func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
 		packets: []MySQLPacket{},
 		initThreadFinish: false,
 		c : make(chan MySQLPacket ,10000),
-
+		wg : &wg,
 	}
 }
 
@@ -245,8 +246,8 @@ type MySQLFSM struct {
 
 	//Used to parse message packets asynchronously
 	initThreadFinish bool
-	c  chan MySQLPacket
-	wg sync.WaitGroup
+	c chan MySQLPacket
+	wg *sync.WaitGroup
 
 	// state info
 	changed bool
