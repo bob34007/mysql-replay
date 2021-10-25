@@ -152,7 +152,7 @@ type Stmt struct {
 }
 
 func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
-	var wg sync.WaitGroup
+
 	return &MySQLFSM{
 		log:     log,
 		state:   StateInit,
@@ -160,9 +160,9 @@ func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
 		stmts:   map[uint32]Stmt{},
 		params:  []interface{}{},
 		packets: []MySQLPacket{},
-		initThreadFinish: false,
-		c : make(chan MySQLPacket ,10000),
-		wg : &wg,
+		once:    new(sync.Once),
+		c:       make(chan MySQLPacket, 10000),
+		wg:      new(sync.WaitGroup),
 	}
 }
 
@@ -245,9 +245,9 @@ type MySQLFSM struct {
 	log *zap.Logger
 
 	//Used to parse message packets asynchronously
-	initThreadFinish bool
-	c chan MySQLPacket
-	wg *sync.WaitGroup
+	once *sync.Once
+	c    chan MySQLPacket
+	wg   *sync.WaitGroup
 
 	// state info
 	changed bool
@@ -1190,19 +1190,21 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 	var err error
 	var rows *textRows
 
+	//fmt.Println(fsm.pr.columnNum, 1193)
 	if fsm.pr.columnNum == 0 {
 		//read cloumn num from packet
 		fsm.pr.columnNum, err = fsm.readResultSetHeaderPacket()
+		//fmt.Println(fsm.pr.columnNum, err)
 		if err != nil {
 			fsm.log.Warn("read column from packet fail " + err.Error() +
 				fmt.Sprintf("%d", fsm.pr.packetnum) +
 				fmt.Sprintf("%d", len(fsm.packets)))
 			fsm.pr.ifReadResEnd = true
-			if mysqlError, ok := err.(*MySQLError); ok{
+			if mysqlError, ok := err.(*MySQLError); ok {
 				fsm.pr.errNo = mysqlError.Number
 				fsm.pr.errDesc = mysqlError.Message
 			} else {
-				fsm.log.Warn("chang to MySQLError fail ,"+err.Error())
+				fsm.log.Warn("chang to MySQLError fail ," + err.Error())
 				fsm.pr.errNo = 20000
 				fsm.pr.errDesc = "exec sql fail and coverted to mysql errorstruct err"
 			}
@@ -1291,7 +1293,7 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 				fsm.pr.errNo = mysqlError.Number
 				fsm.pr.errDesc = mysqlError.Message
 			} else {
-				fsm.log.Warn("chang to MySQLError fail ,"+err.Error())
+				fsm.log.Warn("chang to MySQLError fail ," + err.Error())
 				fsm.pr.errNo = 20000
 				fsm.pr.errDesc = "exec sql fail and coverted to mysql errorstruct err"
 			}
@@ -1594,21 +1596,20 @@ type SqlCompareRes struct {
 	ErrDesc string        `json:"errdesc"`
 }
 
-func ConvertAssignRows(a driver.Value,as *string ) error {
-	return convertAssignRows(as,a)
+func ConvertAssignRows(a driver.Value, as *string) error {
+	return convertAssignRows(as, a)
 }
-
 
 //Compare the value of each column in the result set
 //* converting the column value to a string
 func CompareValue(a driver.Value, b driver.Value, log *zap.Logger) (bool, error) {
 	var as string
-	if a ==nil && b ==nil{
-		return true,nil
-	} else if a == nil && b!=nil{
-		return false ,nil
-	} else if a !=nil && b == nil{
-		return false ,nil
+	if a == nil && b == nil {
+		return true, nil
+	} else if a == nil && b != nil {
+		return false, nil
+	} else if a != nil && b == nil {
+		return false, nil
 	}
 	err := convertAssignRows(&as, a)
 	if err != nil {
@@ -1762,117 +1763,116 @@ func (fsm *MySQLFSM) setBucketNum(execTime uint64, serverType int8) {
 
 }
 
-func (fsm *MySQLFSM) CovertResToStr(v [][]driver.Value) ([][]string,error) {
-	resSet := make([][]string,0)
-	for a :=range v{
-		rowStr := make([]string,0)
-		for b :=range v[a] {
+func (fsm *MySQLFSM) CovertResToStr(v [][]driver.Value) ([][]string, error) {
+	resSet := make([][]string, 0)
+	for a := range v {
+		rowStr := make([]string, 0)
+		for b := range v[a] {
 			var c string
-			if v[a][b] == nil{
+			if v[a][b] == nil {
 				//pay attention on the following logic
 				//If driver.Value is nil, we convert it to a string of length 0,
 				//but then we can't compare nil to a string of length 0
 				c = ""
-				rowStr=append(rowStr,c)
+				rowStr = append(rowStr, c)
 				continue
 			}
 			err := convertAssignRows(&c, v[a][b])
-			if err !=nil{
-				fsm.log.Warn("convert driver.Value to string fail , "+ err.Error())
-				return nil ,err
+			if err != nil {
+				fsm.log.Warn("convert driver.Value to string fail , " + err.Error())
+				return nil, err
 			} else {
-				rowStr=append(rowStr,c)
+				rowStr = append(rowStr, c)
 			}
 		}
-		resSet = append(resSet,rowStr)
+		resSet = append(resSet, rowStr)
 	}
-	return resSet,nil
+	return resSet, nil
 }
 
-func (fsm *MySQLFSM) SortRes (res [][]string){
-	var less =func(i,j int ) bool{
-		if res[i][0] == ""{
+func (fsm *MySQLFSM) SortRes(res [][]string) {
+	var less = func(i, j int) bool {
+		if res[i][0] == "" {
 			return true
 		}
-		if res[j][0] ==""{
+		if res[j][0] == "" {
 			return false
 		}
-		if res[i][0] < res[i][0]{
+		if res[i][0] < res[i][0] {
 			return true
 		}
 		return false
 	}
-	sort.Slice(res,less)
+	sort.Slice(res, less)
 }
-func (fsm *MySQLFSM) CompareRowRes(a,b[]string)(string,bool){
-	if len(a) != len(b){
-		return "",false
+func (fsm *MySQLFSM) CompareRowRes(a, b []string) (string, bool) {
+	if len(a) != len(b) {
+		return "", false
 	}
-	for i:= range a{
-		if a[i] != b[i]{
-			return "",false
+	for i := range a {
+		if a[i] != b[i] {
+			return "", false
 		}
 	}
-	return "",true
+	return "", true
 }
 
-func (fsm *MySQLFSM) CompareQueryRes(a,b [][]string) (string,bool){
+func (fsm *MySQLFSM) CompareQueryRes(a, b [][]string) (string, bool) {
 	//result len equal is compare before ,so here ignore
-	var needComplexCompare =false
-	for i := range a{
-		_,e := fsm.CompareRowRes(a[i],b[i])
-		if e ==false {
-			needComplexCompare=true
+	var needComplexCompare = false
+	for i := range a {
+		_, e := fsm.CompareRowRes(a[i], b[i])
+		if e == false {
+			needComplexCompare = true
 			break
 		}
 	}
 	var rangeAInB = false
 	var rangeBInA = false
-	if needComplexCompare  {
-		for i:= range a {
-			for j:=range b{
-				_,e :=fsm.CompareRowRes(a[i],b[j])
+	if needComplexCompare {
+		for i := range a {
+			for j := range b {
+				_, e := fsm.CompareRowRes(a[i], b[j])
 				if !e {
 					continue
-				}else{
-					rangeAInB=true
+				} else {
+					rangeAInB = true
 					break
 				}
 			}
-			if !rangeAInB{
-				return "",false
-			} else{
-				rangeAInB=false
+			if !rangeAInB {
+				return "", false
+			} else {
+				rangeAInB = false
 			}
 		}
 
-		for i:= range b {
-			for j:=range a{
-				_,e :=fsm.CompareRowRes(b[i],a[j])
+		for i := range b {
+			for j := range a {
+				_, e := fsm.CompareRowRes(b[i], a[j])
 				if !e {
 					continue
-				}else{
-					rangeBInA=true
+				} else {
+					rangeBInA = true
 					break
 				}
 			}
-			if !rangeBInA{
-				return "",false
-			} else{
-				rangeBInA=false
+			if !rangeBInA {
+				return "", false
+			} else {
+				rangeBInA = false
 			}
 		}
 	}
-	return "",true
+	return "", true
 }
-
 
 //compare result from packet and result from tidb server
 // errcode 1: errcode not equal
 // errcode 2: exec time difference is doubled
 // errcode 3: result rownum is not equal
 // errcode 4: row detail is not equal
-func (fsm *MySQLFSM) CompareRes(pr *PacketRes,rr *ReplayRes) *SqlCompareRes {
+func (fsm *MySQLFSM) CompareRes(pr *PacketRes, rr *ReplayRes) *SqlCompareRes {
 
 	res := new(SqlCompareRes)
 	res.Sql = rr.SqlStatment
@@ -1885,7 +1885,6 @@ func (fsm *MySQLFSM) CompareRes(pr *PacketRes,rr *ReplayRes) *SqlCompareRes {
 	} else {
 		prSqlExecTime = 0
 	}
-
 
 	var rrSqlExecTime uint64
 	if rr.SqlBeginTime < rr.SqlEndTime {
@@ -1986,7 +1985,6 @@ func (fsm *MySQLFSM) CompareRes(pr *PacketRes,rr *ReplayRes) *SqlCompareRes {
 	}
 	rrrows = rr.ColValues
 
-
 	i := len(prrows)
 	for j := 0; j < i; j++ {
 		if len(rrrows[j]) != len(prrows[j]) {
@@ -2018,5 +2016,3 @@ func (fsm *MySQLFSM) CompareRes(pr *PacketRes,rr *ReplayRes) *SqlCompareRes {
 
 	return res
 }
-
-

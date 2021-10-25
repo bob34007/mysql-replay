@@ -27,7 +27,8 @@ import (
 
 var ERRORTIMEOUT = errors.New("replay runtime out")
 
-func HandlePcapFile(name string, ts time.Time, rt int, ticker *time.Ticker, assembler *reassembly.Assembler) error {
+func HandlePcapFile(name string, ts time.Time, rt int, ticker *time.Ticker,
+	assembler *reassembly.Assembler,lastFlushTime *time.Time,flushIneterval time.Duration) error {
 	var f *pcap.Handle
 	var err error
 	f, err = pcap.OpenOffline(name)
@@ -38,6 +39,11 @@ func HandlePcapFile(name string, ts time.Time, rt int, ticker *time.Ticker, asse
 	//logger := zap.L().With(zap.String("conn", "compare"))
 	src := gopacket.NewPacketSource(f, f.LinkType())
 	for pkt := range src.Packets() {
+		if meta := pkt.Metadata(); meta != nil && meta.Timestamp.Sub(*lastFlushTime) > flushIneterval {
+			assembler.FlushCloseOlderThan(*lastFlushTime)
+			*lastFlushTime = meta.Timestamp
+		}
+
 		layer := pkt.Layer(layers.LayerTypeTCP)
 		if layer == nil {
 			continue
@@ -61,10 +67,15 @@ func HandlePcapFile(name string, ts time.Time, rt int, ticker *time.Ticker, asse
 func NewWriteFile() *WriteFile{
 	wf :=new(WriteFile)
 	wf.ch =make(chan stream.MySQLEvent,10000)
-	var wg  sync.WaitGroup
-	wf.wg = &wg
+	wf.wg = new(sync.WaitGroup)
 	wf.rrStartGoRuntine = false
+	wf.once = new(sync.Once)
 	return wf
+}
+
+func GenerateFileSeqString(seq int ) string {
+	str := fmt.Sprintf("-%v",seq)
+	return str
 }
 
 func NewTextDumpReplayCommand() *cobra.Command {
@@ -75,12 +86,14 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		dsn       string
 		runTime   string
 		outputDir string
+		flushInterval time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
 		Short: "Replay pcap files",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
+			var fileNameSeq  =0
 			log.Info("process begin run at " + time.Now().String())
 			if len(args) == 0 {
 				return cmd.Help()
@@ -89,7 +102,6 @@ func NewTextDumpReplayCommand() *cobra.Command {
 			ts := time.Now()
 			var ticker *time.Ticker
 			rt, MySQLCfg, err := util.CheckParamValid(dsn, runTime, outputDir)
-			//fmt.Println(MySQLConfig)
 			if err != nil {
 				log.Error("parse param error , " + err.Error())
 				return nil
@@ -102,12 +114,14 @@ func NewTextDumpReplayCommand() *cobra.Command {
 
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 				logger := conn.Logger("replay")
-				fileName := conn.HashStr() + ":" + conn.SrcAddr()
+				fileName := conn.HashStr() + ":" + conn.SrcAddr()+GenerateFileSeqString(fileNameSeq)
+				fileNameSeq++
 				f, err := util.OpenFile(outputDir, fileName)
+				logger.Info("open file for write result "+fileName)
 				if err != nil {
 					panic("create and open  file fail , " + outputDir + "/" + fileName + err.Error())
 				}
-				var wg sync.WaitGroup
+
 				return &replayEventHandler{
 					pconn:       conn,
 					log:         logger,
@@ -115,17 +129,21 @@ func NewTextDumpReplayCommand() *cobra.Command {
 					MySQLConfig: MySQLCfg,
 					ctx:         context.Background(),
 					ch:          make(chan stream.MySQLEvent, 10000),
-					wg:          &wg,
+					wg:          new(sync.WaitGroup),
 					stmts:       make(map[uint64]statement),
 					file:        f,
+					once :      new(sync.Once),
 					wf  :       NewWriteFile(),
 				}
 			}, options)
 			pool := reassembly.NewStreamPool(factory)
 			assembler := reassembly.NewAssembler(pool)
+
+			lastFlushTime := time.Time{}
+
 			for _, in := range args {
 				zap.L().Info("processing " + in)
-				err = HandlePcapFile(in, ts, rt, ticker, assembler)
+				err = HandlePcapFile(in, ts, rt, ticker, assembler,&lastFlushTime,flushInterval)
 				if err != nil && err != ERRORTIMEOUT {
 					return err
 				} else if err == ERRORTIMEOUT {
@@ -145,6 +163,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
 	cmd.Flags().StringVarP(&runTime, "runtime", "t", "0", "replay server run time")
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "./output", "directory used to write the result set")
+	cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute, "flush interval")
 	return cmd
 }
 
@@ -174,7 +193,7 @@ type replayEventHandler struct {
 	rrGetCheckPointTimeInterval int64
 	//rrContinueRun               bool
 	rrNeedReplay     bool
-	rrStartGoRuntine bool
+	once     *sync.Once
 	ch               chan stream.MySQLEvent
 	wg               *sync.WaitGroup
 	file             *os.File
@@ -186,6 +205,7 @@ type WriteFile struct {
 	ch chan stream.MySQLEvent
 	rrStartGoRuntine bool
 	wg  *sync.WaitGroup
+	once *sync.Once
 }
 
 func (h *replayEventHandler) DoWriteResToFile(){
@@ -218,14 +238,12 @@ func (h *replayEventHandler) DoWriteResToFile(){
 }
 
 func (h *replayEventHandler) AsyncWriteResToFile(e stream.MySQLEvent){
-	if h.wf.rrStartGoRuntine == false {
-		h.wf.wg.Add(1)
-		go h.DoWriteResToFile()
-		h.wf.rrStartGoRuntine = true
-	}
+	h.wf.once.Do(
+		func (){
+			h.wf.wg.Add(1)
+			go h.DoWriteResToFile()
+		})
 	h.wf.ch <- e
-
-
 }
 
 
@@ -258,7 +276,7 @@ func (h *replayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.Wai
 			h.AsyncWriteResToFile(e)
 		} else {
 			wg.Done()
-			h.log.Info("thread begin to run for apply mysql event " + h.file.Name())
+			h.log.Info("thread end to run for apply mysql event " + h.file.Name())
 			h.log.Info("chan close ,func exit ")
 			return
 		}
@@ -270,13 +288,13 @@ func (h *replayEventHandler) OnEvent(e stream.MySQLEvent) {
 	//Process SQL events. Note that unlike the events in binlog,
 	//this SQL event is raw and may involve multiple rows
 
-	e.Rr = new(stream.ReplayRes)
-	e.InitRr()
-	if h.rrStartGoRuntine == false {
+	//e.Rr = new(stream.ReplayRes)
+	e.NewReplayRes()
+	//e.InitRr()
+	h.once.Do(func () {
 		h.wg.Add(1)
 		go h.ReplayEvent(h.ch, h.wg)
-		h.rrStartGoRuntine = true
-	}
+	})
 	h.ch <- e
 
 }

@@ -14,7 +14,7 @@ func OpenFile(path, fileName string) (*os.File,error) {
 	//fmt.Println("open file " , fileName)
 
 	fn := path + "/" + fileName
-	f,err:=os.OpenFile(fn, os.O_RDWR|os.O_CREATE ,0755)
+	f,err:=os.OpenFile(fn, os.O_RDWR|os.O_CREATE|os.O_TRUNC,0755)
 	if err!=nil{
 		return nil,err
 	}

@@ -43,7 +43,8 @@ func (event *MySQLEvent) Reset(params []interface{}) *MySQLEvent {
 	return event
 }
 
-func (event *MySQLEvent)InitRr(){
+func (event *MySQLEvent)NewReplayRes(){
+	event.Rr = new(ReplayRes)
 	rr := event.Rr
 	rr.ErrNO = 0
 	rr.ErrDesc = ""
@@ -456,11 +457,11 @@ func (h *eventHandler)AsyncParsePacket(){
 
 //deal  packet from pacp file
 func (h *eventHandler) OnPacket(pkt MySQLPacket) {
-	if !h.fsm.initThreadFinish{
-		h.fsm.initThreadFinish = true
+
+	h.fsm.once.Do(func() {
 		h.fsm.wg.Add(1)
 		go h.AsyncParsePacket()
-	}
+	})
 	h.fsm.c<- pkt
 }
 
