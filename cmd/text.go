@@ -197,7 +197,6 @@ type replayEventHandler struct {
 	ch               chan stream.MySQLEvent
 	wg               *sync.WaitGroup
 	file             *os.File
-	//Rr           *stream.ReplayRes
 	wf             *WriteFile
 }
 
