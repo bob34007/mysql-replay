@@ -129,6 +129,31 @@ type PacketRes struct {
 	ifReadResEnd bool
 }
 
+func (pr *PacketRes)GetSqlBeginTime() uint64{
+	return pr.sqlBeginTime
+}
+
+func (pr *PacketRes)GetSqlEndTime() uint64{
+	return pr.sqlEndTime
+}
+
+func (pr *PacketRes)GetErrNo() uint16{
+	return pr.errNo
+}
+func (pr *PacketRes)GetErrDesc() string{
+	return pr.errDesc
+}
+
+func  (pr *PacketRes)GetColumnVal() [][]driver.Value{
+	if pr.bRows != nil {
+		return pr.bRows.rs.columnValue
+	} else if pr.tRows !=nil  {
+		return pr.tRows.rs.columnValue
+	}
+	return nil
+}
+
+
 
 //Store network packet, parse SQL statement and result packet
 type MySQLFSM struct {

@@ -60,6 +60,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringSliceVar(&opts.logOutput, "log-output", []string{"stderr"}, "log output")
 	cmd.PersistentFlags().StringVar(&opts.pprof, "pprof", "", "enable pprof")
 	cmd.AddCommand(NewTextCommand())
+	cmd.AddCommand(NewOnlineCommand())
 	return cmd
 }
 

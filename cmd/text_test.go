@@ -14,8 +14,3 @@ func TestCmd_GenerateFileSeqString(t *testing.T) {
 	ast.Equal(str,wantStr)
 }
 
-func TestCmd_NewWriteFile(t *testing.T) {
-		wf :=NewWriteFile()
-		ast := assert.New(t)
-		ast.NotNil(wf)
-}

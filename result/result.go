@@ -1,9 +1,10 @@
-package stream
+package result
 
 import (
 	"database/sql/driver"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/bobguo/mysql-replay/stream"
 	"go.uber.org/zap"
 	"os"
 )
@@ -28,7 +29,10 @@ type ResForWriteFile struct {
 	RrResult    [][]string  `json:"rr-result"`
 	Logger      *zap.Logger
 	File        *os.File
-	Pos         int64
+	FilePath    string
+	FileNamePrefix  string
+	Pos uint64
+
 }
 
 func ConvertResToStr(v [][]driver.Value,log *zap.Logger) ([][]string,error) {
@@ -45,7 +49,7 @@ func ConvertResToStr(v [][]driver.Value,log *zap.Logger) ([][]string,error) {
 				rowStr=append(rowStr,c)
 				continue
 			}
-			err := convertAssignRows(&c, v[a][b])
+			err := stream.ConvertAssignRows(v[a][b],&c)
 			if err !=nil{
 				log.Warn("convert driver.Value to string fail , "+ err.Error())
 				return nil ,err
@@ -58,46 +62,40 @@ func ConvertResToStr(v [][]driver.Value,log *zap.Logger) ([][]string,error) {
 	return resSet,nil
 }
 
-
-
-
-func NewResForWriteFile(pr *PacketRes, rr *ReplayRes,e *MySQLEvent, file *os.File) (*ResForWriteFile,error) {
+func NewResForWriteFile(pr *stream.PacketRes, rr *stream.ReplayRes,e *stream.MySQLEvent,
+	filePath,fileNamePrefix string ,file *os.File,pos uint64) (*ResForWriteFile,error) {
 	var err error
 	rs := new(ResForWriteFile)
-	//common
 	rs.DB = e.DB
 	rs.Type =e.Type
 
-	if rs.Type == EventQuery{
+	if rs.Type == stream.EventQuery{
 		rs.Query = e.Query
 	}
-	//fmt.Println(e.Query)
-	if rs.Type == EventStmtExecute {
+
+	if rs.Type == stream.EventStmtExecute {
 		rs.StmtID = e.StmtID
 		rs.Params = rr.Values
 		rs.Query = rr.SqlStatment
 	}
 
-	// packet result
 	rs.File = file
-	rs.PrBeginTime = pr.sqlBeginTime
-	rs.PrEndTime = pr.sqlEndTime
-	rs.PrErrorNo = pr.errNo
-	rs.PrErrorDesc = pr.errDesc
+	rs.Pos =pos
+	rs.PrBeginTime = pr.GetSqlBeginTime()
+	rs.PrEndTime = pr.GetSqlEndTime()
+	rs.PrErrorNo = pr.GetErrNo()
+	rs.PrErrorDesc = pr.GetErrDesc()
 
-	//fmt.Println(rs)
 	rs.Logger = zap.L().With(zap.String("conn", "write-data"))
-	if pr.bRows != nil {
-		rs.PrResult ,err = ConvertResToStr(pr.bRows.rs.columnValue,rs.Logger)
-		if err !=nil{
-			return rs ,err
-		}
-	} else if pr.tRows !=nil  {
-		rs.PrResult,err = ConvertResToStr( pr.tRows.rs.columnValue ,rs.Logger)
+
+	val := pr.GetColumnVal()
+	if val !=nil{
+		rs.PrResult,err = ConvertResToStr( val,rs.Logger)
 		if err !=nil{
 			return rs ,err
 		}
 	}
+
 	//replay server result
 	rs.RrBeginTime = rr.SqlBeginTime
 	rs.RrEndTime = rr.SqlEndTime
@@ -107,15 +105,15 @@ func NewResForWriteFile(pr *PacketRes, rr *ReplayRes,e *MySQLEvent, file *os.Fil
 	if err !=nil{
 		return rs ,err
 	}
-
-
+	rs.FilePath=filePath
+	rs.FileNamePrefix=fileNamePrefix
 	return rs,nil
 }
 
 //formate struct as json and write to file
 //if write file fail ,file will truncate and seek to last write pos
 //func return write pos end ,and error
-func (rs *ResForWriteFile) WriteResToFile() (int64, error) {
+func (rs *ResForWriteFile) WriteResToFile() (uint64, error) {
 	res, err := json.Marshal(rs)
 	if err != nil {
 		rs.Logger.Warn("format json fail ," + err.Error())
@@ -128,29 +126,27 @@ func (rs *ResForWriteFile) WriteResToFile() (int64, error) {
 
 	binary.BigEndian.PutUint64(l, uint64(lens))
 
-	err = rs.WriteData(l,0)
+	writeLen ,err := rs.WriteData(l)
 	if err!=nil{
 		return rs.Pos,err
 	}
 
-	rs.Pos += 8
-
-	err = rs.WriteData(res,8)
+	writeLen1 ,err := rs.WriteData(res)
 	if err!=nil{
 		return rs.Pos,err
 	}
-	rs.Pos += int64(len(res))
+	rs.Pos += writeLen + writeLen1
 	return rs.Pos, nil
 }
 
 
-func (rs *ResForWriteFile ) WriteData (s []byte,n int64) error{
-
-	_, err := rs.File.Write(s)
-	//fmt.Println(rs.File.Name(),m)
+func (rs *ResForWriteFile ) WriteData (s []byte) (uint64,error) {
+	writeLen, err := rs.File.Write(s)
 	if err != nil {
 		rs.Logger.Warn("write data fail , " + err.Error())
-		return err
+		return 0,err
 	}
-	return nil
+
+	return uint64(writeLen),nil
 }
+

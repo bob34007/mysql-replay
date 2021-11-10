@@ -1,0 +1,357 @@
+/*******************************************************************************
+ * Copyright (c)  2021 PingCAP, Inc.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ ******************************************************************************/
+
+/**
+ * @Author: guobob
+ * @Description:
+ * @File:  sqlreplay_test.go
+ * @Version: 1.0.0
+ * @Date: 2021/11/10 10:21
+ */
+
+package replay
+
+import (
+	"context"
+	"database/sql"
+	"github.com/agiledragon/gomonkey"
+	"github.com/bobguo/mysql-replay/stream"
+	"github.com/bobguo/mysql-replay/util"
+	"github.com/go-sql-driver/mysql"
+	"github.com/pingcap/errors"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+	"os"
+	"reflect"
+	"sync"
+	"testing"
+	"time"
+)
+
+var logger *zap.Logger
+
+
+func init (){
+	cfg := zap.NewDevelopmentConfig()
+	//cfg.Level = zap.NewAtomicLevelAt()
+	cfg.DisableStacktrace = !cfg.Level.Enabled(zap.DebugLevel)
+	logger, _ = cfg.Build()
+	zap.ReplaceGlobals(logger)
+	logger = zap.L().With(zap.String("conn","test-mysql.go"))
+	logger = logger.Named("test")
+}
+
+func TestReplayEventHandler_GenerateNextFileName(t *testing.T) {
+	type fields struct {
+		pconn                       stream.ConnID
+		dsn                         string
+		fsm                         *stream.MySQLFSM
+		log                         *zap.Logger
+		MySQLConfig                 *mysql.Config
+		schema                      string
+		pool                        *sql.DB
+		conn                        *sql.Conn
+		stmts                       map[uint64]statement
+		ctx                         context.Context
+		filterStr                   string
+		needCompareRes              bool
+		needCompareExecTime         bool
+		rrLastGetCheckPointTime     time.Time
+		rrCheckPoint                time.Time
+		rrGetCheckPointTimeInterval int64
+		rrNeedReplay                bool
+		once                        *sync.Once
+		ch                          chan stream.MySQLEvent
+		wg                          *sync.WaitGroup
+		file                        *os.File
+		wf                          *WriteFile
+		fileNamePrefix              string
+		fileName                    string
+		filePath                    string
+		storePath                   string
+		preFileSize                 uint64
+		pos                         uint64
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   string
+	}{
+		{
+			name: "get next file name ",
+			fields: fields{
+				fileNamePrefix: "127.0.0.1:4000",
+			},
+			want: "127.0.0.1:4000-2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &ReplayEventHandler{
+				pconn:                       tt.fields.pconn,
+				dsn:                         tt.fields.dsn,
+				fsm:                         tt.fields.fsm,
+				log:                         tt.fields.log,
+				MySQLConfig:                 tt.fields.MySQLConfig,
+				schema:                      tt.fields.schema,
+				pool:                        tt.fields.pool,
+				conn:                        tt.fields.conn,
+				stmts:                       tt.fields.stmts,
+				ctx:                         tt.fields.ctx,
+				filterStr:                   tt.fields.filterStr,
+				needCompareRes:              tt.fields.needCompareRes,
+				needCompareExecTime:         tt.fields.needCompareExecTime,
+				rrLastGetCheckPointTime:     tt.fields.rrLastGetCheckPointTime,
+				rrCheckPoint:                tt.fields.rrCheckPoint,
+				rrGetCheckPointTimeInterval: tt.fields.rrGetCheckPointTimeInterval,
+				rrNeedReplay:                tt.fields.rrNeedReplay,
+				once:                        tt.fields.once,
+				ch:                          tt.fields.ch,
+				wg:                          tt.fields.wg,
+				file:                        tt.fields.file,
+				wf:                          tt.fields.wf,
+				fileNamePrefix:              tt.fields.fileNamePrefix,
+				fileName:                    tt.fields.fileName,
+				filePath:                    tt.fields.filePath,
+				storePath:                   tt.fields.storePath,
+				preFileSize:                 tt.fields.preFileSize,
+				pos:                         tt.fields.pos,
+			}
+			if got := h.GenerateNextFileName(); got != tt.want {
+				t.Errorf("GenerateNextFileName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFileNameSeq_getNextFileNameSuffix(t *testing.T) {
+	tests := []struct {
+		name string
+		fs   FileNameSeq
+		want string
+	}{
+		{
+			name:"get file name suffix ",
+			fs : FileNameSeq(2),
+			want: "-3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.fs.getNextFileNameSuffix(); got != tt.want {
+				t.Errorf("getNextFileNameSuffix() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenNexFile_With_OpenFile_Fail(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.filePath = "./"
+	r.fileNamePrefix ="127.0.0.1:4000"
+	err := errors.New("do not have privileges")
+	patch := gomonkey.ApplyFunc(util.OpenFile, func (path, fileName string) (*os.File,error){
+		return nil,err
+	})
+	defer patch.Reset()
+
+	err1:=r.OpenNextFile()
+
+	ast:=assert.New(t)
+	ast.Nil(r.file)
+	ast.Equal(err,err1)
+}
+
+func TestOpenNexFile_With_OpenFile_Succ(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.filePath = "./"
+	r.fileNamePrefix ="127.0.0.1:4000"
+	patch := gomonkey.ApplyFunc(util.OpenFile, func (path, fileName string) (*os.File,error){
+		return new(os.File),nil
+	})
+	defer patch.Reset()
+
+	err1:=r.OpenNextFile()
+	ast:=assert.New(t)
+	ast.Equal(r.pos,uint64(0))
+	ast.Nil(err1)
+}
+
+func TestCheckIfChangeFile_With_True(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.pos =100
+	r.preFileSize=90
+	b:=r.CheckIfChangeFile()
+	assert.New(t).True(b)
+}
+
+func TestCheckIfChangeFile_With_False(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.pos =100
+	r.preFileSize=110
+	b:=r.CheckIfChangeFile()
+	assert.New(t).False(b)
+}
+
+func TestCloseAndBackupFile_With_Sync_Fail(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.file = new(os.File)
+	r.filePath="./"
+	r.storePath="./"
+	r.fileNamePrefix="127.0.0.1:4000"
+	r.fileName=r.GenerateNextFileName()
+	err := errors.New("has no space left")
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Sync",
+		func(_ *os.File) error {
+			return err
+		})
+	defer patches.Reset()
+
+	err1 := r.CloseAndBackupFile()
+
+	assert.New(t).Equal(err,err1)
+}
+
+func TestCloseAndBackupFile_With_Close_Fail(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.file = new(os.File)
+	r.filePath="./"
+	r.storePath="./"
+	r.fileNamePrefix="127.0.0.1:4000"
+	r.fileName=r.GenerateNextFileName()
+	err := errors.New("close file fail")
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Sync",
+		func(_ *os.File) error {
+			return nil
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Close",
+		func(_ *os.File) error {
+			return err
+		})
+	defer patches1.Reset()
+
+	err1 := r.CloseAndBackupFile()
+
+	assert.New(t).Equal(err,err1)
+}
+
+func TestCloseAndBackupFile_With_storePath_Zero(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.file = new(os.File)
+	r.filePath="./"
+	r.storePath=""
+	r.fileNamePrefix="127.0.0.1:4000"
+	r.fileName=r.GenerateNextFileName()
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Sync",
+		func(_ *os.File) error {
+			return nil
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Close",
+		func(_ *os.File) error {
+			return nil
+		})
+	defer patches1.Reset()
+
+	err1 := r.CloseAndBackupFile()
+
+	assert.New(t).Nil(err1)
+}
+
+func TestCloseAndBackupFile_With_Rename_Fail(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.file = new(os.File)
+	r.filePath="./"
+	r.storePath="./"
+	r.fileNamePrefix="127.0.0.1:4000"
+	r.fileName=r.GenerateNextFileName()
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Sync",
+		func(_ *os.File) error {
+			return nil
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Close",
+		func(_ *os.File) error {
+			return nil
+		})
+	defer patches1.Reset()
+
+	err :=errors.New("do not have privileges")
+	patch := gomonkey.ApplyFunc(os.Rename, func (oldpath string, newpath string) error{
+		return err
+	})
+	defer patch.Reset()
+
+	err1 := r.CloseAndBackupFile()
+
+	assert.New(t).Equal(err1,err)
+}
+
+func TestCloseAndBackupFile_With_Rename_Succ(t *testing.T){
+	r := new(ReplayEventHandler)
+	r.file = new(os.File)
+	r.filePath="./"
+	r.storePath=""
+	r.fileNamePrefix="127.0.0.1:4000"
+	r.fileName=r.GenerateNextFileName()
+
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Sync",
+		func(_ *os.File) error {
+			return nil
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(r.file), "Close",
+		func(_ *os.File) error {
+			return nil
+		})
+	defer patches1.Reset()
+
+	//err :=errors.New("do not have privileges")
+	patch := gomonkey.ApplyFunc(os.Rename, func (oldpath string, newpath string) error{
+		return nil
+	})
+	defer patch.Reset()
+
+	err1 := r.CloseAndBackupFile()
+
+	assert.New(t).Nil(err1)
+}
+
+func TestNewWriteFile(t *testing.T){
+
+	wf := NewWriteFile()
+	assert.New(t).NotNil(wf)
+}
+
+func TestNewReplayEventHandler(t *testing.T){
+	var conn stream.ConnID
+	log :=logger
+	dsn :="root:glb34007@tcp(172.16.5.189:4000)/TPCC"
+	mysqlCfg :=new( mysql.Config)
+	filePath :="./"
+	storePath :="./"
+	preFileSize := uint64(100)
+
+	r := NewReplayEventHandler(conn ,log , dsn ,
+		mysqlCfg ,filePath ,storePath , preFileSize )
+	assert.New(t).NotNil(r)
+}
