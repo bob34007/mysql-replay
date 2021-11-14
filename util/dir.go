@@ -5,6 +5,7 @@ import (
 	"github.com/pingcap/errors"
 	uuid "github.com/satori/go.uuid"
 	"go.uber.org/zap"
+	"io/ioutil"
 	"os"
 )
 
@@ -84,4 +85,43 @@ func CheckDirExistAndPrivileges (path string) (bool,error){
 	}
 	return ok ,nil
 
+}
+
+
+
+func GetFileNumFromPath(path string) (int64,error){
+	var fileNum int64 =0
+	if len(path) ==0{
+		return 0,nil
+	}
+	files,err := ioutil.ReadDir(path)
+	if err !=nil{
+		return 0,err
+	}
+	for _,f := range files {
+		if f.IsDir() {
+			continue
+		}
+		fileNum++
+	}
+
+	return fileNum,nil
+}
+
+func GetFileSizeFromPath(path string) (int64,error){
+	var fileSizeCnt int64 =0
+	if len(path) ==0{
+		return 0,nil
+	}
+	files,err := ioutil.ReadDir(path)
+	if err !=nil{
+		return 0,err
+	}
+	for _,f := range files {
+		if f.IsDir() {
+			continue
+		}
+		fileSizeCnt += f.Size()
+	}
+	return fileSizeCnt,nil
 }

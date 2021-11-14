@@ -139,18 +139,18 @@ func TestReplayEventHandler_GenerateNextFileName(t *testing.T) {
 func TestFileNameSeq_getNextFileNameSuffix(t *testing.T) {
 	tests := []struct {
 		name string
-		fs   FileNameSeq
+		fs   util.FileNameSeq
 		want string
 	}{
 		{
 			name:"get file name suffix ",
-			fs : FileNameSeq(2),
+			fs : util.FileNameSeq(2),
 			want: "-3",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.fs.getNextFileNameSuffix(); got != tt.want {
+			if got := tt.fs.GetNextFileNameSuffix(); got != tt.want {
 				t.Errorf("getNextFileNameSuffix() = %v, want %v", got, tt.want)
 			}
 		})

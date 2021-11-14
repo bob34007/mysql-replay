@@ -65,6 +65,8 @@ func trafficCapture(device string, port uint16,
 	lastFlushTime *time.Time, flushInterval time.Duration,
 	 runTime uint32, log *zap.Logger) error {
 
+
+	var packetNum uint64
 	ts:= time.Now()
 	handle, err := pcap.OpenLive(device, MAXPACKETLEN, false, pcap.BlockForever)
 	if err != nil {
@@ -91,6 +93,7 @@ func trafficCapture(device string, port uint16,
 
 	for pkt := range packetSource.Packets() {
 		if time.Since(ts).Seconds() > float64(runTime *60) {
+			logger.Warn("program run timeout , " + fmt.Sprintf("%v",int64(runTime *60)))
 			return ERRORTIMEOUT
 		}
 		if meta := pkt.Metadata(); meta != nil && meta.Timestamp.Sub(*lastFlushTime) > flushInterval {
@@ -100,11 +103,17 @@ func trafficCapture(device string, port uint16,
 
 		layer := pkt.Layer(layers.LayerTypeTCP)
 		if layer == nil {
+			log.Error("pkt.Layer id is nil")
 			continue
 		}
 		tcp := layer.(*layers.TCP)
 		if tcp.DstPort != layers.TCPPort(port) && tcp.SrcPort !=layers.TCPPort(port) {
 			continue
+		}
+
+		packetNum ++
+		if packetNum%10000==0{
+			log.Warn("receive packet num : " + fmt.Sprintf("%v",packetNum))
 		}
 		assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
 	}
@@ -117,7 +126,7 @@ func printTime(log *zap.Logger){
 	for {
 		select{
 		  case <-t.C:
-			 log.Info(time.Now().String() +":"+ fmt.Sprintf("program run %v seconds",time.Since(ts).Seconds()))
+			 fmt.Println(time.Now().String() +":"+ fmt.Sprintf("program run %v seconds",time.Since(ts).Seconds()))
 			  default:
 				  time.Sleep(time.Second *5)
 		}
@@ -138,7 +147,8 @@ func NewOnlineReplayCommand() *cobra.Command {
 		preFileSize   uint64
 		deviceName    string
 		srcPort       uint16
-		storeDir        string
+		storeDir      string
+		listenPort    uint16
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -160,6 +170,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 				return nil
 			}
 
+			go AddPortListenAndServer(listenPort,outputDir,storeDir)
 			//general packet to json
 			err = trafficCapture(deviceName, srcPort, dsn, outputDir,storeDir, MySQLCfg, preFileSize,
 				options, &lastFlushTime, flushInterval,  runTime, log)
@@ -183,6 +194,6 @@ func NewOnlineReplayCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&storeDir, "storeDir", "S", "./store", "save result dir")
 	srcPort = *cmd.Flags().Uint16P("srcPort", "P", 4000, "server port")
 	cmd.Flags().Uint64VarP(&preFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
-
+	cmd.Flags().Uint16VarP(&listenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
 	return cmd
 }

@@ -1,9 +1,34 @@
 package util
 
 import (
+	"fmt"
 	"github.com/pingcap/errors"
 	"os"
+	"sync"
 )
+
+
+type FileNameSeq int
+
+var (
+	FileNameSuffix FileNameSeq =1
+	mu sync.Mutex
+)
+
+func  GetFileNameSeq() int64 {
+	mu.Lock()
+	defer mu.Unlock()
+	return int64(FileNameSuffix)
+}
+
+func (fs FileNameSeq) GetNextFileNameSuffix ()string {
+	mu.Lock()
+	defer mu.Unlock()
+	FileNameSuffix ++
+	return fmt.Sprintf("-%v",FileNameSuffix)
+}
+
+
 
 func OpenFile(path, fileName string) (*os.File,error) {
 	if len(path)==0 || len(fileName)==0{

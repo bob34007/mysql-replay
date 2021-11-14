@@ -74,6 +74,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		outputDir string
 		flushInterval time.Duration
 		preFileSize uint64
+		listenPort uint16
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -93,6 +94,8 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				log.Error("parse param error , " + err.Error())
 				return nil
 			}
+
+			go AddPortListenAndServer(listenPort,outputDir,"")
 
 			if runTime > 0 {
 				ticker = time.NewTicker(3 * time.Second)
@@ -133,6 +136,8 @@ func NewTextDumpReplayCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "./output", "directory used to write the result set")
 	cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute, "flush interval")
 	cmd.Flags().Uint64VarP(&preFileSize,"filesize","s",UINT64MAX,"Baseline size per document , unit M")
+	cmd.Flags().Uint16VarP(&listenPort, "listen-port", "P", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
+
 	return cmd
 }
 

@@ -86,7 +86,7 @@ func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
 		params:  []interface{}{},
 		packets: []MySQLPacket{},
 		once:    new(sync.Once),
-		c:       make(chan MySQLPacket, 10000),
+		c:       make(chan MySQLPacket, 100000),
 		wg:      new(sync.WaitGroup),
 	}
 }

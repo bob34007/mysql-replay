@@ -41,22 +41,6 @@ import (
 	"unsafe"
 )
 
-
-type FileNameSeq int
-
-var (
-	fileNameSuffix FileNameSeq =1
-	mu sync.Mutex
-)
-
-func (fs FileNameSeq) getNextFileNameSuffix ()string {
-	mu.Lock()
-	defer mu.Unlock()
-	fileNameSuffix ++
-	return fmt.Sprintf("-%v",fileNameSuffix)
-}
-
-
 //Store prepare statement and handle
 type statement struct {
 	query  string
@@ -71,7 +55,7 @@ func NewReplayEventHandler(conn stream.ConnID,log *zap.Logger, dsn string,
 		dsn:         dsn,
 		MySQLConfig: mysqlCfg,
 		ctx:         context.Background(),
-		ch:          make(chan stream.MySQLEvent, 10000),
+		ch:          make(chan stream.MySQLEvent, 100000),
 		wg:          new(sync.WaitGroup),
 		stmts:       make(map[uint64]statement),
 		once:        new(sync.Once),
@@ -126,7 +110,7 @@ type WriteFile struct {
 
 func NewWriteFile() *WriteFile {
 	wf := new(WriteFile)
-	wf.ch = make(chan stream.MySQLEvent, 10000)
+	wf.ch = make(chan stream.MySQLEvent, 100000)
 	wf.wg = new(sync.WaitGroup)
 	wf.rrStartGoRuntine = false
 	wf.once = new(sync.Once)
@@ -134,7 +118,7 @@ func NewWriteFile() *WriteFile {
 }
 
 func (h *ReplayEventHandler) GenerateNextFileName() string {
-	return h.fileNamePrefix+fileNameSuffix.getNextFileNameSuffix()
+	return h.fileNamePrefix+util.FileNameSuffix.GetNextFileNameSuffix()
 }
 
 func (h *ReplayEventHandler)OpenNextFile() error{
@@ -245,6 +229,9 @@ func (h *ReplayEventHandler) AsyncWriteResToFile(e stream.MySQLEvent) {
 			go h.DoWriteResToFile()
 		})
 	h.wf.ch <- e
+	if len(h.wf.ch) >90000{
+		h.log.Warn("write Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.wf.ch),100000))
+	}
 }
 
 func (h *ReplayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.WaitGroup) {
@@ -296,7 +283,9 @@ func (h *ReplayEventHandler) OnEvent(e stream.MySQLEvent) {
 		go h.ReplayEvent(h.ch, h.wg)
 	})
 	h.ch <- e
-
+	if len(h.ch) >90000{
+		h.log.Warn("sql Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.ch),100000))
+	}
 }
 
 func (h *ReplayEventHandler) OnClose() {
