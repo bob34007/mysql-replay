@@ -146,7 +146,7 @@ func (s *mysqlStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reass
 func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.AssemblerContext) {
 	length, _ := sg.Lengths()
 	if length == 0 {
-		s.log.Warn("get packet data len is zero")
+		s.log.Info("get packet data len is zero")
 		return
 	}
 

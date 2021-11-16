@@ -31,6 +31,7 @@ const (
 	StateComQuery2
 	StateComStmtExecute1
 	StateComStmtExecute2
+	StateSkipPacket
 )
 
 func StateName(state int) string {
@@ -63,6 +64,8 @@ func StateName(state int) string {
 		return "Handshake0"
 	case StateHandshake1:
 		return "Handshake1"
+	case StateSkipPacket:
+		return "StateSkipPacket"
 	default:
 		return "Invalid"
 	}
@@ -244,7 +247,11 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 	} else if fsm.nextSeq() == pkt.Seq {
 		fsm.packets = append(fsm.packets, pkt)
 	} else {
-		fsm.log.Warn("pkt seq is not correct "+ fmt.Sprintf("%v-%v",fsm.packets,pkt.Seq))
+		stateChgBefore := StateName(fsm.State())
+		fsm.setStatusWithNoChange(StateSkipPacket)
+		stateChgAfter := StateName(fsm.State())
+		fsm.log.Warn("pkt seq is not correct "+
+			fmt.Sprintf("%v-%v,%v-%v",fsm.nextSeq(),pkt.Seq,stateChgBefore,stateChgAfter))
 		return
 	}
 
@@ -545,6 +552,7 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 	fsm.set(StateComStmtExecute)
 }
 
+/*
 func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
 	//Check whether the statement is a SELECT statement
 	//or a SELECT prepare statement
@@ -575,6 +583,8 @@ func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
 	}
 	return false
 }
+*/
+
 
 func (fsm *MySQLFSM) handleComStmtCloseNoLoad() {
 	//handle prepare close
