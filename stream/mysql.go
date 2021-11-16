@@ -244,10 +244,12 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 	} else if fsm.nextSeq() == pkt.Seq {
 		fsm.packets = append(fsm.packets, pkt)
 	} else {
+		fsm.log.Warn("pkt seq is not correct "+ fmt.Sprintf("%v-%v",fsm.packets,pkt.Seq))
 		return
 	}
 
 	if !fsm.Ready() {
+		fsm.log.Warn("packet is not ready")
 		return
 	}
 

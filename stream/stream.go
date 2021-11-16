@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/google/gopacket"
@@ -81,10 +82,10 @@ type mysqlStreamFactory struct {
 	new  func(key ConnID) MySQLPacketHandler
 	opts FactoryOptions
 
-	ts time.Time
+	//ts time.Time
 }
 
-func (f *mysqlStreamFactory) LastStreamTime() time.Time { return f.ts }
+//func (f *mysqlStreamFactory) LastStreamTime() time.Time { return f.ts }
 
 func (f *mysqlStreamFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
 	conn := ConnID{netFlow, tcpFlow}
@@ -98,9 +99,9 @@ func (f *mysqlStreamFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP
 			}
 		}()
 	}
-	if ac != nil && f.ts.Sub(ac.GetCaptureInfo().Timestamp) < 0 {
+	/*if ac != nil && f.ts.Sub(ac.GetCaptureInfo().Timestamp) < 0 {
 		f.ts = ac.GetCaptureInfo().Timestamp
-	}
+	}*/
 	//stats.Add(stats.Streams, 1)
 	return &mysqlStream{
 		conn: conn,
@@ -145,6 +146,7 @@ func (s *mysqlStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reass
 func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.AssemblerContext) {
 	length, _ := sg.Lengths()
 	if length == 0 {
+		s.log.Warn("get packet data len is zero")
 		return
 	}
 
@@ -162,14 +164,18 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 	}
 
 	if skip < 0 {
-		s.log.Info("trim duplicated data", zap.String("dir", dir.String()), zap.Int("size", -skip))
+		s.log.Warn("trim duplicated data", zap.String("dir", dir.String()), zap.Int("size", -skip))
+		if -skip >= len(data) {
+			s.log.Warn("trim too much data", zap.String("dir", dir.String()), zap.Int("size", -skip), zap.Int("data-size", len(data)))
+			return
+		}
 		data = data[-skip:]
 	}
 
 	if buf == nil {
 		buf = bytes.NewBuffer(data)
 		if seq := lookupPacketSeq(buf); s.getBuf(!dir) == nil && seq != 0 {
-			s.log.Info("drop init packet with non-zero seq",
+			s.log.Warn("drop init packet with non-zero seq",
 				zap.String("dir", dir.String()), zap.String("data", formatData(data)))
 			return
 		}
@@ -196,12 +202,14 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 			}
 		}
 		if pkt.Seq == -1 || buf.Len() < pkt.Len+4 {
-			s.log.Debug("wait for more packet data", zap.String("dir", dir.String()))
+			s.log.Warn("wait for more packet data", zap.String("dir", dir.String()),
+				zap.String("msg" ,fmt.Sprintf("pkt seq is %v,pkt len %v,buf len %v",
+					pkt.Seq,pkt.Len,buf.Len())))
 			if s.getPkt(dir) == nil && pkt.Seq >= 0 {
 				s.setPkt(dir, pkt)
 			}
 			if ac == nil && cnt > 0 {
-				s.log.Info("fallback to last seen time",
+				s.log.Warn("fallback to last seen time",
 					zap.String("dir", dir.String()), zap.Int("packets", cnt), zap.Time("time", ts))
 			}
 			return
@@ -218,7 +226,7 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 		s.setPkt(dir, nil)
 	}
 	if ac == nil && cnt > 0 {
-		s.log.Info("fallback to last seen time",
+		s.log.Warn("fallback to last seen time",
 			zap.String("dir", dir.String()), zap.Int("packets", cnt), zap.Time("time", ts))
 	}
 }

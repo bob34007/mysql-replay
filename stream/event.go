@@ -395,6 +395,7 @@ func (h *eventHandler) Accept(ci gopacket.CaptureInfo, dir reassembly.TCPFlowDir
 func (h *eventHandler)ParsePacket(pkt MySQLPacket) *MySQLEvent{
 	h.fsm.Handle(pkt)
 	if !h.fsm.Ready() || !h.fsm.Changed() {
+		//h.fsm.log.Warn("packet is not ready")
 		return nil
 	}
 	e := &MySQLEvent{Time: pkt.Time.UnixNano()}

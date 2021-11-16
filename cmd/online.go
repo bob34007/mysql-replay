@@ -67,6 +67,7 @@ func trafficCapture(device string, port uint16,
 
 
 	var packetNum uint64
+	var InvalidMsgPktNum uint64
 	ts:= time.Now()
 	handle, err := pcap.OpenLive(device, MAXPACKETLEN, false, pcap.BlockForever)
 	if err != nil {
@@ -76,7 +77,7 @@ func trafficCapture(device string, port uint16,
 
 	//set filter
 	filter := bPFFilter(port)
-	log.Info("SetBPFFilter" + filter)
+	log.Info("SetBPFFilter " + filter)
 	err = handle.SetBPFFilter(filter)
 	if err != nil {
 		return err
@@ -108,11 +109,15 @@ func trafficCapture(device string, port uint16,
 		}
 		tcp := layer.(*layers.TCP)
 		if tcp.DstPort != layers.TCPPort(port) && tcp.SrcPort !=layers.TCPPort(port) {
+			InvalidMsgPktNum ++
+			if InvalidMsgPktNum % 100000 == 0{
+				log.Info("receive invalid message packet num : " + fmt.Sprintf("%v",InvalidMsgPktNum))
+			}
 			continue
 		}
 
 		packetNum ++
-		if packetNum%10000==0{
+		if packetNum%100000==0{
 			log.Warn("receive packet num : " + fmt.Sprintf("%v",packetNum))
 		}
 		assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
@@ -171,7 +176,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 			}
 
 			go AddPortListenAndServer(listenPort,outputDir,storeDir)
-			//general packet to json
+			//handle online packet
 			err = trafficCapture(deviceName, srcPort, dsn, outputDir,storeDir, MySQLCfg, preFileSize,
 				options, &lastFlushTime, flushInterval,  runTime, log)
 			if err != nil && err != ERRORTIMEOUT{
@@ -192,7 +197,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute, "flush interval")
 	cmd.Flags().StringVarP(&deviceName, "device", "D", "eth0", "device name")
 	cmd.Flags().StringVarP(&storeDir, "storeDir", "S", "./store", "save result dir")
-	srcPort = *cmd.Flags().Uint16P("srcPort", "P", 4000, "server port")
+	cmd.Flags().Uint16VarP(&srcPort,"srcPort", "P", 4000, "server port")
 	cmd.Flags().Uint64VarP(&preFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
 	cmd.Flags().Uint16VarP(&listenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
 	return cmd
