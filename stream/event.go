@@ -464,7 +464,7 @@ func (h *eventHandler) OnPacket(pkt MySQLPacket) {
 		go h.AsyncParsePacket()
 	})
 	h.fsm.c<- pkt
-	if len(h.fsm.c) >90000{
+	if len(h.fsm.c) >90000 && len(h.fsm.c)% 1000 ==0 {
 		h.fsm.log.Warn("packet Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.fsm.c),100000))
 	}
 }

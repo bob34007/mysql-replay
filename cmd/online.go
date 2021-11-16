@@ -157,7 +157,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
-		Short: "Replay pcap files",
+		Short: "Replay online packet",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			preFileSize = preFileSize * 1024 * 1024
 			lastFlushTime := time.Time{}

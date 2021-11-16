@@ -229,7 +229,7 @@ func (h *ReplayEventHandler) AsyncWriteResToFile(e stream.MySQLEvent) {
 			go h.DoWriteResToFile()
 		})
 	h.wf.ch <- e
-	if len(h.wf.ch) >90000{
+	if len(h.wf.ch) >90000 && len(h.wf.ch)% 1000 ==0{
 		h.log.Warn("write Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.wf.ch),100000))
 	}
 }
@@ -283,7 +283,7 @@ func (h *ReplayEventHandler) OnEvent(e stream.MySQLEvent) {
 		go h.ReplayEvent(h.ch, h.wg)
 	})
 	h.ch <- e
-	if len(h.ch) >90000{
+	if len(h.ch) >90000 && len(h.ch)% 1000 ==0{
 		h.log.Warn("sql Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.ch),100000))
 	}
 }
