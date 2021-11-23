@@ -35,7 +35,7 @@ import (
 	"github.com/google/gopacket/reassembly"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-	"strconv"
+	//"strconv"
 	"time"
 )
 
@@ -51,24 +51,102 @@ func NewOnlineCommand() *cobra.Command {
 	return cmd
 }
 
-func generateLogName( device string, port uint16) string {
+func generateLogName(device string, port uint16) string {
 	return fmt.Sprintf("%v-%s", port, device)
 }
 
-func bPFFilter(port uint16) string {
-	return "tcp and port " + strconv.Itoa(int(port))
+func getFilter(port uint16) string {
+	filter := fmt.Sprintf("tcp and ((src port %v) or (dst port %v))", port, port)
+	return filter
 }
 
 func trafficCapture(device string, port uint16,
-	dsn, outputDir,tmpDir string, MySQLCfg *mysql.Config,
+	dsn, outputDir, storeDir string, MySQLCfg *mysql.Config,
+	preFileSize uint64, options stream.FactoryOptions,
+	runTime uint32, log *zap.Logger) error {
+
+	var packetNum uint64
+	//var InvalidMsgPktNum uint64
+	ts := time.Now()
+	handle, err := pcap.OpenLive(device, 65535, false, pcap.BlockForever)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+
+	//set filter
+	filter := getFilter(port)
+	log.Info("SetBPFFilter " + filter)
+	err = handle.SetBPFFilter(filter)
+	if err != nil {
+		return err
+	}
+
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+
+	// Process packet here
+	factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
+		logger := conn.Logger("replay")
+		return replay.NewReplayEventHandler(conn, logger, dsn, MySQLCfg, outputDir, storeDir, preFileSize)
+	}, options)
+
+	pool := reassembly.NewStreamPool(factory)
+	assembler := reassembly.NewAssembler(pool)
+
+	packets := packetSource.Packets()
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case pkt := <-packets:
+			if pkt.NetworkLayer() == nil || pkt.TransportLayer() == nil {
+				continue
+			}
+			layer := pkt.Layer(layers.LayerTypeTCP)
+			if layer == nil {
+				log.Error("pkt.Layer is nil")
+				continue
+			}
+			tcp := layer.(*layers.TCP)
+
+			packetNum++
+			if packetNum%100000 == 0 {
+				log.Warn("receive packet num : " + fmt.Sprintf("%v", packetNum))
+			}
+			assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp,
+				captureContext(pkt.Metadata().CaptureInfo))
+
+		case <-ticker.C:
+			if time.Since(ts).Seconds() > float64(runTime*60) {
+				logger.Warn("program run timeout , " + fmt.Sprintf("%v", int64(runTime*60)))
+				return ERRORTIMEOUT
+			}
+
+			stats, err := handle.Stats()
+			logger.Warn(fmt.Sprintf("flushing all streams that haven't seen"+
+				" packets in the last 2 minutes, pcap stats: %+v %v", stats, err))
+			flushed, closed := assembler.FlushCloseOlderThan(time.Now().Add(-2*time.Minute))
+			logger.Warn(fmt.Sprintf("flushed old connect %v-%v", flushed, closed))
+		default :
+			//
+		}
+
+	}
+
+	//return nil
+}
+
+func trafficCapture1(device string, port uint16,
+	dsn, outputDir, tmpDir string, MySQLCfg *mysql.Config,
 	preFileSize uint64, options stream.FactoryOptions,
 	lastFlushTime *time.Time, flushInterval time.Duration,
-	 runTime uint32, log *zap.Logger) error {
-
+	runTime uint32, log *zap.Logger) error {
 
 	var packetNum uint64
 	var InvalidMsgPktNum uint64
-	ts:= time.Now()
+	ts := time.Now()
 	handle, err := pcap.OpenLive(device, MAXPACKETLEN, false, pcap.BlockForever)
 	if err != nil {
 		return err
@@ -76,7 +154,7 @@ func trafficCapture(device string, port uint16,
 	defer handle.Close()
 
 	//set filter
-	filter := bPFFilter(port)
+	filter := getFilter(port)
 	log.Info("SetBPFFilter " + filter)
 	err = handle.SetBPFFilter(filter)
 	if err != nil {
@@ -87,18 +165,19 @@ func trafficCapture(device string, port uint16,
 	// Process packet here
 	factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 		logger := conn.Logger("replay")
-		return replay.NewReplayEventHandler(conn, logger, dsn, MySQLCfg, outputDir,tmpDir, preFileSize)
+		return replay.NewReplayEventHandler(conn, logger, dsn, MySQLCfg, outputDir, tmpDir, preFileSize)
 	}, options)
 	pool := reassembly.NewStreamPool(factory)
 	assembler := reassembly.NewAssembler(pool)
 
 	for pkt := range packetSource.Packets() {
-		if time.Since(ts).Seconds() > float64(runTime *60) {
-			logger.Warn("program run timeout , " + fmt.Sprintf("%v",int64(runTime *60)))
+		if time.Since(ts).Seconds() > float64(runTime*60) {
+			logger.Warn("program run timeout , " + fmt.Sprintf("%v", int64(runTime*60)))
 			return ERRORTIMEOUT
 		}
 		if meta := pkt.Metadata(); meta != nil && meta.Timestamp.Sub(*lastFlushTime) > flushInterval {
-			assembler.FlushCloseOlderThan(*lastFlushTime)
+			flushed, closed := assembler.FlushCloseOlderThan(*lastFlushTime)
+			logger.Warn(fmt.Sprintf("flushed old connect %v-%v-%v-%v", flushed, closed, *lastFlushTime, flushInterval))
 			*lastFlushTime = meta.Timestamp
 		}
 
@@ -108,38 +187,24 @@ func trafficCapture(device string, port uint16,
 			continue
 		}
 		tcp := layer.(*layers.TCP)
-		if tcp.DstPort != layers.TCPPort(port) && tcp.SrcPort !=layers.TCPPort(port) {
-			InvalidMsgPktNum ++
-			if InvalidMsgPktNum % 100000 == 0{
-				log.Info("receive invalid message packet num : " + fmt.Sprintf("%v",InvalidMsgPktNum))
+		if tcp.DstPort != layers.TCPPort(port) && tcp.SrcPort != layers.TCPPort(port) {
+			InvalidMsgPktNum++
+			if InvalidMsgPktNum%100000 == 0 {
+				log.Info("receive invalid message packet num : " + fmt.Sprintf("%v", InvalidMsgPktNum))
 			}
 			continue
 		}
 
-		packetNum ++
-		if packetNum%100000==0{
-			log.Warn("receive packet num : " + fmt.Sprintf("%v",packetNum))
+		packetNum++
+		if packetNum%100000 == 0 {
+			log.Warn("receive packet num : " + fmt.Sprintf("%v", packetNum))
 		}
 		assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
 	}
 	return nil
 }
 
-func printTime(log *zap.Logger){
-	t := time.NewTicker(time.Second * 60)
-	ts := time.Now()
-	for {
-		select{
-		  case <-t.C:
-			 fmt.Println(time.Now().String() +":"+ fmt.Sprintf("program run %v seconds",time.Since(ts).Seconds()))
-			  default:
-				  time.Sleep(time.Second *5)
-		}
 
-	}
-
-
-}
 
 func NewOnlineReplayCommand() *cobra.Command {
 	//Replay sql from online net packet
@@ -148,7 +213,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 		dsn           string
 		runTime       uint32
 		outputDir     string
-		flushInterval time.Duration
+		//flushInterval time.Duration
 		preFileSize   uint64
 		deviceName    string
 		srcPort       uint16
@@ -160,7 +225,6 @@ func NewOnlineReplayCommand() *cobra.Command {
 		Short: "Replay online packet",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			preFileSize = preFileSize * 1024 * 1024
-			lastFlushTime := time.Time{}
 			logName := generateLogName(deviceName, srcPort)
 			log := zap.L().Named(logName)
 			log.Info("process begin run at " + time.Now().String())
@@ -169,21 +233,21 @@ func NewOnlineReplayCommand() *cobra.Command {
 
 			ts := time.Now()
 
-			MySQLCfg, err := util.CheckParamValid(dsn,  outputDir)
+			MySQLCfg, err := util.CheckParamValid(dsn, outputDir)
 			if err != nil {
 				log.Error("parse param error , " + err.Error())
 				return nil
 			}
 
-			go AddPortListenAndServer(listenPort,outputDir,storeDir)
+			go AddPortListenAndServer(listenPort, outputDir, storeDir)
 			//handle online packet
-			err = trafficCapture(deviceName, srcPort, dsn, outputDir,storeDir, MySQLCfg, preFileSize,
-				options, &lastFlushTime, flushInterval,  runTime, log)
-			if err != nil && err != ERRORTIMEOUT{
+			err = trafficCapture(deviceName, srcPort, dsn, outputDir, storeDir, MySQLCfg, preFileSize,
+				options,  runTime, log)
+			if err != nil && err != ERRORTIMEOUT {
 				return err
-			} else if err==ERRORTIMEOUT{
-				log.Info("process time to stop ,start at :"+ts.String()+" end at :" + time.Now().String()+
-					" specify running time : " + fmt.Sprintf("%vs",runTime*60 ))
+			} else if err == ERRORTIMEOUT {
+				log.Info("process time to stop ,start at :" + ts.String() + " end at :" + time.Now().String() +
+					" specify running time : " + fmt.Sprintf("%vs", runTime*60))
 				return nil
 			}
 			return nil
@@ -194,10 +258,10 @@ func NewOnlineReplayCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
 	cmd.Flags().Uint32VarP(&runTime, "runtime", "t", 0, "replay server run time")
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "./output", "directory used to write the result set ")
-	cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute, "flush interval")
+	//cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute*10, "flush interval")
 	cmd.Flags().StringVarP(&deviceName, "device", "D", "eth0", "device name")
-	cmd.Flags().StringVarP(&storeDir, "storeDir", "S", "./store", "save result dir")
-	cmd.Flags().Uint16VarP(&srcPort,"srcPort", "P", 4000, "server port")
+	cmd.Flags().StringVarP(&storeDir, "storeDir", "S", "", "save result dir")
+	cmd.Flags().Uint16VarP(&srcPort, "srcPort", "P", 4000, "server port")
 	cmd.Flags().Uint64VarP(&preFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
 	cmd.Flags().Uint16VarP(&listenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
 	return cmd

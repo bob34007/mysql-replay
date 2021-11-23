@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 	"io/ioutil"
 	"os"
+	"sync"
 )
 
 var DIRPATHLENERROR = errors.New("dir path len is 0")
@@ -125,3 +126,33 @@ func GetFileSizeFromPath(path string) (int64,error){
 	}
 	return fileSizeCnt,nil
 }
+
+func GetDataFile(filePath string,files map[string]int,mu *sync.Mutex) error {
+
+	err := GetFilesFromPath(filePath,files,mu)
+	if err!=nil{
+		return err
+	}
+	return nil
+}
+
+func GetFilesFromPath(filePath string,files map[string]int,mu *sync.Mutex) error {
+
+	fs, err := ioutil.ReadDir(filePath)
+	if err!=nil{
+		return err
+	}
+
+	for _, file := range fs {
+		if file.IsDir() {
+			continue
+		} else {
+			mu.Lock()
+			files[file.Name()]=0
+			mu.Unlock()
+		}
+	}
+
+	return nil
+}
+

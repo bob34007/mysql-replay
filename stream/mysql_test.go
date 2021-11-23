@@ -2,10 +2,9 @@ package stream
 
 import (
 	"bytes"
+	"database/sql/driver"
 	"encoding/binary"
-
 	"github.com/agiledragon/gomonkey"
-
 	//"github.com/gobwas/glob/syntax/ast"
 	"testing"
 	"time"
@@ -25,6 +24,8 @@ func init() {
 	logger = zap.L().With(zap.String("conn", "test-mysql.go"))
 	logger = logger.Named("test")
 }
+
+
 
 
 
@@ -420,7 +421,29 @@ func TestMysql_handleComQueryNoLoad(t *testing.T) {
 	ast.Equal(fsm.state, StateComQuery)
 }
 
+func TestMysql_IsSelectStmtOrSelectPrepare_succ(t *testing.T) {
+	query := " select * from test"
+	fsm := new(MySQLFSM)
+	fsm.log = logger
+	b := fsm.IsSelectStmtOrSelectPrepare(query)
 
+	ast := assert.New(t)
+
+	ast.True(b)
+
+}
+
+func TestMysql_IsSelectStmtOrSelectPrepare_fail(t *testing.T) {
+	query := " selet * from test"
+	fsm := new(MySQLFSM)
+	fsm.log = logger
+	b := fsm.IsSelectStmtOrSelectPrepare(query)
+
+	ast := assert.New(t)
+
+	ast.False(b)
+
+}
 
 func TestMysql_handleComStmtCloseNoLoad_succ(t *testing.T) {
 	fsm := new(MySQLFSM)
@@ -954,3 +977,250 @@ func TestMysql_readStatus(t *testing.T) {
 	ast := assert.New(t)
 	ast.Equal(c, statusFlag(1))
 }
+
+func TestStateName(t *testing.T) {
+	type args struct {
+		state int
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name:"StateInit",
+			args:args{
+				state:StateInit,
+			},
+			want:"Init",
+		},
+		{
+			name:"StateUnknown",
+			args:args{
+				state:StateUnknown,
+			},
+			want:"Unknown",
+		},
+		{
+			name:"StateComQuery",
+			args:args{
+				state:StateComQuery,
+			},
+			want:"ComQuery",
+		},
+		{
+			name:"StateComQuery1",
+			args:args{
+				state:StateComQuery1,
+			},
+			want:"ReadingComQueryRes",
+		},
+		{
+			name:"StateComQuery2",
+			args:args{
+				state:StateComQuery2,
+			},
+			want:"ReadComQueryResEnd",
+		},
+		{
+			name:"StateComStmtExecute",
+			args:args{
+				state:StateComStmtExecute,
+			},
+			want:"ComStmtExecute",
+		},
+		{
+			name:"StateComStmtExecute1",
+			args:args{
+				state:StateComStmtExecute1,
+			},
+			want:"ReadingComStmtExecuteRes",
+		},
+		{
+			name:"StateComStmtExecute2",
+			args:args{
+				state:StateComStmtExecute2,
+			},
+			want:"ReadingComStmtExecuteEnd",
+		},
+		{
+			name:"StateComStmtClose",
+			args:args{
+				state:StateComStmtClose,
+			},
+			want:"ComStmtClose",
+		},
+		{
+			name:"StateComStmtPrepare0",
+			args:args{
+				state:StateComStmtPrepare0,
+			},
+			want:"ComStmtPrepare0",
+		},
+		{
+			name:"StateComStmtPrepare1",
+			args:args{
+				state:StateComStmtPrepare1,
+			},
+			want:"ComStmtPrepare1",
+		},
+		{
+			name:"StateComQuit",
+			args:args{
+				state:StateComQuit,
+			},
+			want:"ComQuit",
+		},
+		{
+			name:"StateHandshake0",
+			args:args{
+				state:StateHandshake0,
+			},
+			want:"Handshake0",
+		},
+		{
+			name:"StateHandshake1",
+			args:args{
+				state:StateHandshake1,
+			},
+			want:"Handshake1",
+		},
+		{
+			name:"StateSkipPacket",
+			args:args{
+				state:StateSkipPacket,
+			},
+			want:"StateSkipPacket",
+		},
+		{
+			name:"UNKnown",
+			args:args{
+				state:100,
+			},
+			want:"Invalid",
+		},
+	}
+		for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StateName(tt.args.state); got != tt.want {
+				t.Errorf("StateName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPacketRes_GetSqlBeginTime (t *testing.T){
+	pr:=new(PacketRes)
+	ts:=uint64(time.Now().Unix())
+	pr.sqlBeginTime = ts
+	ts1:=pr.GetSqlBeginTime()
+	assert.New(t).Equal(ts,ts1)
+}
+
+func TestPacketRes_GetSqlEndTime (t *testing.T) {
+	pr:=new(PacketRes)
+	ts:=uint64(time.Now().Unix())
+	pr.sqlEndTime = ts
+	ts1:=pr.GetSqlEndTime()
+	assert.New(t).Equal(ts,ts1)
+}
+
+func TestPacketRes_GetErrNo (t *testing.T) {
+	pr:=new(PacketRes)
+	pr.errNo=1062
+	errno:=pr.GetErrNo()
+	assert.New(t).Equal(errno,uint16(1062))
+}
+
+func TestPacketRes_GetErrDesc (t *testing.T) {
+	pr:=new(PacketRes)
+	pr.errDesc="lock wait timeout "
+	errdesc:=pr.GetErrDesc()
+	assert.New(t).Equal(errdesc,"lock wait timeout ")
+}
+
+func TestPacketRes_GetColumnVal_bRows (t *testing.T) {
+	pr:=new(PacketRes)
+	pr.bRows = new(binaryRows )
+	pr.bRows.rs = resultSet{}
+	pr.bRows.rs.columnValue = make([][]driver.Value,0)
+	value1:=make([]driver.Value,0)
+	value1 = append(value1,"aaaa")
+	pr.bRows.rs.columnValue=append(pr.bRows.rs.columnValue,value1)
+	vol:=pr.GetColumnVal()
+	assert.New(t).NotNil(vol)
+}
+
+func TestPacketRes_GetColumnVal_tRows (t *testing.T) {
+	pr:=new(PacketRes)
+	pr.bRows=nil
+	pr.tRows = new(textRows )
+	pr.tRows.rs = resultSet{}
+	pr.tRows.rs.columnValue = make([][]driver.Value,0)
+	value1:=make([]driver.Value,0)
+	value1 = append(value1,"aaaa")
+	pr.tRows.rs.columnValue=append(pr.tRows.rs.columnValue,value1)
+	vol:=pr.GetColumnVal()
+	assert.New(t).NotNil(vol)
+}
+
+func TestPacketRes_GetColumnVal_nil (t *testing.T) {
+	pr:=new(PacketRes)
+	pr.bRows=nil
+	pr.tRows=nil
+	vol:=pr.GetColumnVal()
+	assert.New(t).Nil(vol)
+}
+
+func TestFSM_NextSeq_len_zero(t *testing.T){
+	fsm:=NewMySQLFSM(logger)
+	fsm.packets=fsm.packets[0:0]
+	n := fsm.nextSeq()
+	assert.New(t).Equal(n,0)
+}
+
+func TestFSM_NextSeq(t *testing.T){
+	fsm:=NewMySQLFSM(logger)
+	fsm.packets=append(fsm.packets,MySQLPacket{
+		Seq:1,
+	})
+	n := fsm.nextSeq()
+	assert.New(t).Equal(n,2)
+}
+/*
+func TestFSM_isClientCommand_client(t *testing.T){
+	fsm :=NewMySQLFSM(logger)
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(fsm), "assertDir",
+		func(_ *MySQLFSM , exp reassembly.TCPFlowDirection) bool{
+			return false
+		})
+	defer patches.Reset()
+	cmd := uint8(0)
+	res:=fsm.isClientCommand(cmd)
+
+	assert.New(t).False(res)
+}
+
+
+func TestFSM_isClientCommand_server(t *testing.T){
+	fsm :=NewMySQLFSM(logger)
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(fsm), "assertDir",
+		func(_ *MySQLFSM,exp reassembly.TCPFlowDirection) bool {
+			return true
+		})
+	defer patches.Reset()
+
+	patches1 := gomonkey.ApplyMethod(reflect.TypeOf(fsm), "assertDataByte",
+		func(_ *MySQLFSM,offset int, exp byte) bool {
+			return true
+		})
+	defer patches1.Reset()
+
+	cmd := uint8(0)
+	res:=fsm.isClientCommand(cmd)
+
+	assert.New(t).True(res)
+}
+
+
+ */

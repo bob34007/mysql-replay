@@ -61,6 +61,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&opts.pprof, "pprof", "", "enable pprof")
 	cmd.AddCommand(NewTextCommand())
 	cmd.AddCommand(NewOnlineCommand())
+	cmd.AddCommand(NewDirTextCommand())
 	return cmd
 }
 

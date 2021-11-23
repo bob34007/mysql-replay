@@ -40,6 +40,7 @@ func (k ConnID) Reverse() ConnID {
 	return ConnID{k[0].Reverse(), k[1].Reverse()}
 }
 
+
 func (k ConnID) Hash() uint64 {
 	h := fnvHash(k[0].Src().Raw(), k[1].Src().Raw()) + fnvHash(k[0].Dst().Raw(), k[1].Dst().Raw())
 	h ^= uint64(k[0].EndpointType())
@@ -164,12 +165,15 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 	}
 
 	if skip < 0 {
-		s.log.Warn("trim duplicated data", zap.String("dir", dir.String()), zap.Int("size", -skip))
-		if -skip >= len(data) {
-			s.log.Warn("trim too much data", zap.String("dir", dir.String()), zap.Int("size", -skip), zap.Int("data-size", len(data)))
-			return
-		}
-		data = data[-skip:]
+		/*
+			s.log.Warn("trim duplicated data", zap.String("dir", dir.String()), zap.Int("size", -skip))
+			if -skip >= len(data) {
+				s.log.Warn("trim too much data", zap.String("dir", dir.String()), zap.Int("size", -skip), zap.Int("data-size", len(data)))
+				return
+			}
+			data = data[-skip:]
+		*/
+		s.log.Warn("streams without SYN/SYN+ACK/ACK sequence", zap.String("dir", dir.String()), zap.Int("size", -skip))
 	}
 
 	if buf == nil {
@@ -181,9 +185,13 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 		}
 	} else {
 		if skip > 0 {
-			s.log.Warn("fill skipped data", zap.String("dir", dir.String()), zap.Int("size", skip))
-			buf.Grow(skip)
-			buf.Write(make([]byte, skip))
+			/*
+				s.log.Warn("fill skipped data", zap.String("dir", dir.String()), zap.Int("size", skip))
+				buf.Grow(skip)
+				buf.Write(make([]byte, skip))
+			*/
+			s.log.Warn("missing net bytes ", zap.Int("len", skip))
+			//return
 		}
 		buf.Write(data)
 	}
@@ -203,8 +211,8 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 		}
 		if pkt.Seq == -1 || buf.Len() < pkt.Len+4 {
 			s.log.Warn("wait for more packet data", zap.String("dir", dir.String()),
-				zap.String("msg" ,fmt.Sprintf("pkt seq is %v,pkt len %v,buf len %v",
-					pkt.Seq,pkt.Len,buf.Len())))
+				zap.String("msg", fmt.Sprintf("pkt seq is %v,pkt len %v,buf len %v",
+					pkt.Seq, pkt.Len, buf.Len())))
 			if s.getPkt(dir) == nil && pkt.Seq >= 0 {
 				s.setPkt(dir, pkt)
 			}

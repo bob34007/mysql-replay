@@ -73,3 +73,16 @@ func TestUtil_OpenFile_Succ( t *testing.T){
 	ast.Nil(err)
 	ast.Equal(f1,f)
 }
+
+func TestFileNameSeq_GetNextFileNameSuffix(t *testing.T) {
+	FileNameSuffix =1
+	wantString:="-2"
+	fileNameSuffix := FileNameSuffix.GetNextFileNameSuffix()
+	assert.New(t).Equal(fileNameSuffix,wantString)
+}
+func Test_GetFileNameSeq(t *testing.T){
+	FileNameSuffix =2
+	fileNameSeq := GetFileNameSeq()
+	assert.New(t).Equal(fileNameSeq,int64(2))
+}
+

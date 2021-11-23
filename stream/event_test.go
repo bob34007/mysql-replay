@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/agiledragon/gomonkey"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/reassembly"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"math"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -616,3 +621,228 @@ func TestStream_ParsePacket_NotChange(t *testing.T){
 
 }
 
+func TestMySQLEvent_NewReplayRes(t *testing.T) {
+	event:= &MySQLEvent{}
+	event.NewReplayRes()
+	assert.New(t).NotNil(event.Rr)
+}
+
+func TestMysqlEvent_Reset(t *testing.T){
+	event:= &MySQLEvent{}
+	params  := []interface{}{"aaa","bbbb"}
+	event.Reset(params)
+	assert.New(t).Equal(event.Params,params)
+	assert.New(t).Equal(event.StmtID,uint64(0))
+}
+
+func TestMySQLEvent_String(t *testing.T) {
+	ts := time.Now().Unix()
+	query:= "select * from t;"
+	stmtid:=uint64(10)
+	params:=[]interface{}{"aaa","bbb"}
+	db:="test"
+	type fields struct {
+		Time   int64
+		Type   uint64
+		StmtID uint64
+		Params []interface{}
+		DB     string
+		Query  string
+		Fsm    *MySQLFSM
+		Pr     *PacketRes
+		Rr     *ReplayRes
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   string
+	}{
+		{
+			name : "EventQuery",
+			fields: fields{
+				Type:EventQuery,
+				Query: query,
+				Time :ts,
+			},
+			want:fmt.Sprintf("execute {query:%q} @ %d", formatQuery(query), ts),
+		},
+		{
+			name : "EventStmtExecute",
+			fields: fields{
+				Type:EventStmtExecute,
+				Time :ts,
+				StmtID: stmtid,
+				Params: params,
+			},
+			want:fmt.Sprintf("execute stmt {id:%d,params:%v} @%d", stmtid, params, ts),
+		},
+		{
+			name : "EventStmtPrepare",
+			fields: fields{
+				Type:EventStmtPrepare,
+				Time :ts,
+				StmtID: stmtid,
+				Query: query,
+			},
+			want:fmt.Sprintf("prepare stmt {id:%d,query:%q} @%d",stmtid, formatQuery(query), ts),
+		},
+		{
+			name : "EventStmtClose",
+			fields: fields{
+				Type:EventStmtClose,
+				Time :ts,
+				StmtID: stmtid,
+				Query: query,
+			},
+			want:fmt.Sprintf("close stmt {id:%d} @%d", stmtid, ts),
+		},
+		{
+			name : "EventHandshake",
+			fields: fields{
+				Type:EventHandshake,
+				Time :ts,
+				StmtID: stmtid,
+				Query: query,
+				DB: db,
+			},
+			want:fmt.Sprintf("connect {db:%q} @%d",db,ts),
+		},
+		{
+			name : "EventQuit",
+			fields: fields{
+				Type:EventQuit,
+				Time :ts,
+				StmtID: stmtid,
+				Query: query,
+				DB: db,
+			},
+			want:fmt.Sprintf("quit @%d", ts),
+		},
+		{
+			name : "UnknownEvent",
+			fields: fields{
+				Type:uint64(1000),
+				Time :ts,
+				StmtID: stmtid,
+				Query: query,
+				DB: db,
+			},
+			want:fmt.Sprintf("unknown event {type:%v} @%d", uint64(1000), ts),
+		},
+	}
+		for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := &MySQLEvent{
+				Time:   tt.fields.Time,
+				Type:   tt.fields.Type,
+				StmtID: tt.fields.StmtID,
+				Params: tt.fields.Params,
+				DB:     tt.fields.DB,
+				Query:  tt.fields.Query,
+				Fsm:    tt.fields.Fsm,
+				Pr:     tt.fields.Pr,
+				Rr:     tt.fields.Rr,
+			}
+			if got := event.String(); got != tt.want {
+				t.Errorf("String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_formatQuery(t *testing.T) {
+
+	longStr:=strings.Repeat("select",300)
+
+	type args struct {
+		query string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "len lt 1024",
+			args:args{
+				query:"select * from t",
+			},
+			want:"select * from t",
+		},
+		{
+			name: "len lg 1024",
+			args:args{
+				query:longStr,
+			},
+			want:longStr[:700] + "..." + longStr[len(longStr)-300:],
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatQuery(tt.args.query); got != tt.want {
+				t.Errorf("formatQuery() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+type ForTest struct{
+
+}
+func (f *ForTest)OnEvent(e MySQLEvent){
+	fmt.Println(e.Type)
+}
+func (f *ForTest)OnClose(){
+	return
+}
+
+func TestNewFactoryFromEventHandler(t *testing.T) {
+	factory:= func(conn ConnID) MySQLEventHandler {
+		return &ForTest{}
+	}
+	opts :=FactoryOptions{Synchronized: true}
+	res:=NewFactoryFromEventHandler(factory,opts)
+
+	assert.New(t).NotNil(res)
+}
+
+func TestEvent_Accept(t *testing.T){
+	var ci gopacket.CaptureInfo
+	var dir reassembly.TCPFlowDirection
+	var tcp *layers.TCP
+	e := new(eventHandler)
+	e.Accept(ci,dir,tcp)
+}
+
+func TestEvent_AsyncParsePacket (t *testing.T){
+	log := zap.L().Named("test")
+	h:=new(eventHandler)
+	h.fsm=NewMySQLFSM(log)
+	h.fsm.wg.Add(1)
+	close(h.fsm.c)
+	h.AsyncParsePacket()
+}
+
+func TestEvent_OnPacket (t *testing.T){
+	log := zap.L().Named("test")
+	h:=new(eventHandler)
+	h.fsm=NewMySQLFSM(log)
+	patches := gomonkey.ApplyMethod(reflect.TypeOf(h), "AsyncParsePacket",
+		func(_ *eventHandler)  {
+			return
+		})
+	defer patches.Reset()
+
+	var pkt MySQLPacket
+	h.OnPacket(pkt)
+	h.fsm.wg.Done()
+	close(h.fsm.c)
+}
+
+func TestEvent_OnClose (t *testing.T){
+	log := zap.L().Named("test")
+	h:=new(eventHandler)
+	h.impl=&ForTest{}
+	h.fsm=NewMySQLFSM(log)
+	h.OnClose()
+}

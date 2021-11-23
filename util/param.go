@@ -5,7 +5,7 @@ import (
 	"github.com/pingcap/errors"
 )
 
-func CheckParamValid (dsn,outputDir string ) (*mysql.Config,error){
+func CheckParamValid (dsn,outputDir,storeDir string ) (*mysql.Config,error){
 
 	var err error
 
@@ -30,6 +30,13 @@ func CheckParamValid (dsn,outputDir string ) (*mysql.Config,error){
 	_,err = CheckDirExistAndPrivileges(outputDir)
 	if err != nil {
 		return nil,err
+	}
+
+	if len(storeDir) > 0 {
+		_,err = CheckDirExistAndPrivileges(storeDir)
+		if err != nil {
+			return nil,err
+		}
 	}
 
 	return MySQLConfig,nil

@@ -53,7 +53,7 @@ func Test_generateLogName(t *testing.T) {
 	}
 }
 
-func Test_bPFFilter(t *testing.T) {
+func Test_getFilter(t *testing.T) {
 	type args struct {
 		port uint16
 	}
@@ -63,16 +63,16 @@ func Test_bPFFilter(t *testing.T) {
 		want string
 	}{
 		{
-			name: "test bPFFilter",
+			name: "test getFilter",
 			args: args{
 				port: 4000,
 			},
-			want: "tcp and port 4000",
+			want: "tcp and ((src port 4000) or (dst port 4000))",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := bPFFilter(tt.args.port); got != tt.want {
+			if got := getFilter(tt.args.port); got != tt.want {
 				t.Errorf("bPFFilter() = %v, want %v", got, tt.want)
 			}
 		})

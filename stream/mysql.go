@@ -89,7 +89,7 @@ func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
 		params:  []interface{}{},
 		packets: []MySQLPacket{},
 		once:    new(sync.Once),
-		c:       make(chan MySQLPacket, 100000),
+		c:       make(chan MySQLPacket, 10000),
 		wg:      new(sync.WaitGroup),
 	}
 }
@@ -249,6 +249,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 	} else {
 		stateChgBefore := StateName(fsm.State())
 		fsm.setStatusWithNoChange(StateSkipPacket)
+		//fsm.setStatusWithNoChange(StateInit)
 		stateChgAfter := StateName(fsm.State())
 		fsm.log.Warn("pkt seq is not correct "+
 			fmt.Sprintf("%v-%v,%v-%v",fsm.nextSeq(),pkt.Seq,stateChgBefore,stateChgAfter))
@@ -552,7 +553,6 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 	fsm.set(StateComStmtExecute)
 }
 
-/*
 func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
 	//Check whether the statement is a SELECT statement
 	//or a SELECT prepare statement
@@ -583,8 +583,6 @@ func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
 	}
 	return false
 }
-*/
-
 
 func (fsm *MySQLFSM) handleComStmtCloseNoLoad() {
 	//handle prepare close

@@ -55,7 +55,7 @@ func NewReplayEventHandler(conn stream.ConnID,log *zap.Logger, dsn string,
 		dsn:         dsn,
 		MySQLConfig: mysqlCfg,
 		ctx:         context.Background(),
-		ch:          make(chan stream.MySQLEvent, 100000),
+		ch:          make(chan stream.MySQLEvent, 10000),
 		wg:          new(sync.WaitGroup),
 		stmts:       make(map[uint64]statement),
 		once:        new(sync.Once),
@@ -110,7 +110,7 @@ type WriteFile struct {
 
 func NewWriteFile() *WriteFile {
 	wf := new(WriteFile)
-	wf.ch = make(chan stream.MySQLEvent, 100000)
+	wf.ch = make(chan stream.MySQLEvent, 10000)
 	wf.wg = new(sync.WaitGroup)
 	wf.rrStartGoRuntine = false
 	wf.once = new(sync.Once)
@@ -229,9 +229,11 @@ func (h *ReplayEventHandler) AsyncWriteResToFile(e stream.MySQLEvent) {
 			go h.DoWriteResToFile()
 		})
 	h.wf.ch <- e
+	/*
 	if len(h.wf.ch) >90000 && len(h.wf.ch)% 1000 ==0{
 		h.log.Warn("write Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.wf.ch),100000))
 	}
+	 */
 }
 
 func (h *ReplayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.WaitGroup) {
@@ -283,9 +285,9 @@ func (h *ReplayEventHandler) OnEvent(e stream.MySQLEvent) {
 		go h.ReplayEvent(h.ch, h.wg)
 	})
 	h.ch <- e
-	if len(h.ch) >90000 && len(h.ch)% 1000 ==0{
+	/*if len(h.ch) >90000 && len(h.ch)% 1000 ==0{
 		h.log.Warn("sql Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.ch),100000))
-	}
+	}*/
 }
 
 func (h *ReplayEventHandler) OnClose() {

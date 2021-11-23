@@ -5,12 +5,8 @@ import (
 	"github.com/bobguo/mysql-replay/replay"
 	"github.com/bobguo/mysql-replay/stream"
 	"github.com/bobguo/mysql-replay/util"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/reassembly"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"time"
@@ -18,43 +14,6 @@ import (
 
 var UINT64MAX uint64= 1<<64 -1
 var ERRORTIMEOUT = errors.New("replay runtime out")
-
-func HandlePcapFile(name string, ts time.Time, rt uint32, ticker *time.Ticker,
-	assembler *reassembly.Assembler,lastFlushTime *time.Time,flushIneterval time.Duration) error {
-	var f *pcap.Handle
-	var err error
-	f, err = pcap.OpenOffline(name)
-	if err != nil {
-		return errors.Annotate(err, "open "+name)
-	}
-	defer f.Close()
-	//logger := zap.L().With(zap.String("conn", "compare"))
-	src := gopacket.NewPacketSource(f, f.LinkType())
-	for pkt := range src.Packets() {
-		if meta := pkt.Metadata(); meta != nil && meta.Timestamp.Sub(*lastFlushTime) > flushIneterval {
-			assembler.FlushCloseOlderThan(*lastFlushTime)
-			*lastFlushTime = meta.Timestamp
-		}
-
-		layer := pkt.Layer(layers.LayerTypeTCP)
-		if layer == nil {
-			continue
-		}
-		tcp := layer.(*layers.TCP)
-		assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
-		if rt > 0 {
-			select {
-			case <-ticker.C:
-				if time.Since(ts).Seconds() > float64(rt*60) {
-					return ERRORTIMEOUT
-				}
-			default:
-				//
-			}
-		}
-	}
-	return nil
-}
 
 
 func GenerateFileSeqString(seq int ) string {
@@ -72,6 +31,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		dsn       string
 		runTime   uint32
 		outputDir string
+		storeDir  string
 		flushInterval time.Duration
 		preFileSize uint64
 		listenPort uint16
@@ -82,6 +42,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 			preFileSize = preFileSize *1024 *1024
+			log := zap.L().Named("text-replay")
 			log.Info("process begin run at " + time.Now().String())
 			if len(args) == 0 {
 				return cmd.Help()
@@ -89,13 +50,13 @@ func NewTextDumpReplayCommand() *cobra.Command {
 
 			ts := time.Now()
 			var ticker *time.Ticker
-			MySQLCfg, err := util.CheckParamValid(dsn,  outputDir)
+			MySQLCfg, err := util.CheckParamValid(dsn,  outputDir,storeDir)
 			if err != nil {
 				log.Error("parse param error , " + err.Error())
 				return nil
 			}
-
-			go AddPortListenAndServer(listenPort,outputDir,"")
+			go printTime(log)
+			go AddPortListenAndServer(listenPort,outputDir, storeDir)
 
 			if runTime > 0 {
 				ticker = time.NewTicker(3 * time.Second)
@@ -104,7 +65,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 				logger := conn.Logger("replay")
-				return replay.NewReplayEventHandler(conn,logger,dsn,MySQLCfg,outputDir,"",preFileSize)
+				return replay.NewReplayEventHandler(conn,logger,dsn,MySQLCfg,outputDir,storeDir,preFileSize)
 			}, options)
 
 			pool := reassembly.NewStreamPool(factory)
@@ -134,6 +95,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
 	cmd.Flags().Uint32VarP(&runTime, "runtime", "t", 0, "replay server run time")
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "./output", "directory used to write the result set")
+	cmd.Flags().StringVarP(&storeDir, "storeDir", "S", "", "save result dir")
 	cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute, "flush interval")
 	cmd.Flags().Uint64VarP(&preFileSize,"filesize","s",UINT64MAX,"Baseline size per document , unit M")
 	cmd.Flags().Uint16VarP(&listenPort, "listen-port", "P", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
