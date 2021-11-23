@@ -39,7 +39,8 @@ func HandlePcapFile(name string, ts time.Time, rt uint32, ticker *time.Ticker,
 	src := gopacket.NewPacketSource(f, f.LinkType())
 	for pkt := range src.Packets() {
 		if meta := pkt.Metadata(); meta != nil && meta.Timestamp.Sub(*lastFlushTime) > flushIneterval {
-			assembler.FlushCloseOlderThan(*lastFlushTime)
+			flushed,closed:=assembler.FlushCloseOlderThan(*lastFlushTime)
+			fmt.Println(fmt.Sprintf("flush old connect fulshed:%v,closed:%v",flushed,closed))
 			*lastFlushTime = meta.Timestamp
 		}
 

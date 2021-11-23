@@ -549,6 +549,11 @@ func readLengthEncodedString(b []byte) ([]byte, bool, int, error) {
 	// Get length
 	num, isNull, n := readLengthEncodedInteger(b)
 	if num < 1 {
+		//prevent empty slice from being read out of bounds
+		if cap(b) <1 {
+			return nil,isNull,0,
+				errors.New(fmt.Sprintf("read data from nil slice ,slice:%v,len:%v,cap:%v",b,len(b),cap(b)))
+		}
 		return b[n:n], isNull, n, nil
 	}
 

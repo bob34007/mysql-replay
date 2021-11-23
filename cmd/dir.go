@@ -44,6 +44,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 		storeDir    string
 		listenPort  uint16
 		dataDir     string
+		flushInterval time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -97,7 +98,6 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 
 			fileName := ""
 			for {
-
 				mu.Lock()
 					fileName = getFirstFileName(files)
 					if len(fileName) == 0 {
@@ -107,7 +107,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 				mu.Unlock()
 				log.Info("process file " + fileName)
 				err := HandlePcapFile(dataDir+"/"+fileName, ts , runTime, ticker,
-					assembler,&lastFlushTime,3 )
+					assembler,&lastFlushTime,flushInterval )
 				if err != nil && err != ERRORTIMEOUT {
 					return err
 				} else if err == ERRORTIMEOUT {
@@ -130,6 +130,6 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 	cmd.Flags().Uint64VarP(&preFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
 	cmd.Flags().Uint16VarP(&listenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
 	cmd.Flags().StringVarP(&dataDir, "data-dir", "D", "./data", "directory used to read pcap file")
-
+	cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute, "flush interval")
 	return cmd
 }

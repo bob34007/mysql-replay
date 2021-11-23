@@ -233,7 +233,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 
 			ts := time.Now()
 
-			MySQLCfg, err := util.CheckParamValid(dsn, outputDir)
+			MySQLCfg, err := util.CheckParamValid(dsn, outputDir,storeDir)
 			if err != nil {
 				log.Error("parse param error , " + err.Error())
 				return nil
