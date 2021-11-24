@@ -1147,8 +1147,8 @@ func (fsm *MySQLFSM) handleReadSQLResult() error { //ColumnNum() error {
 		if fsm.pr.tRows == nil {
 			rows := new(textRows)
 			fsm.pr.tRows = rows
-			rows.rs.columnValue = make([][]driver.Value, 0)
-			rows.rs.columns = make([]mysqlField, 0)
+			rows.rs.columnValue = make([][]driver.Value, 0,fsm.pr.columnNum)
+			rows.rs.columns = make([]mysqlField, 0,fsm.pr.columnNum)
 			rows.fsm = fsm
 		}
 		rows = fsm.pr.tRows
@@ -1234,8 +1234,8 @@ func (fsm *MySQLFSM) handleReadPrepareExecResult() error {
 		if fsm.pr.bRows == nil {
 			rows = new(binaryRows)
 			fsm.pr.bRows = rows
-			rows.rs.columns = make([]mysqlField, 0)
-			rows.rs.columnValue = make([][]driver.Value, 0)
+			rows.rs.columns = make([]mysqlField, 0,fsm.pr.columnNum)
+			rows.rs.columnValue = make([][]driver.Value, 0,fsm.pr.columnNum)
 			rows.fsm = fsm
 		}
 		rows = fsm.pr.bRows

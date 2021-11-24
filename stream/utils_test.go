@@ -9,6 +9,8 @@
 package stream
 
 import (
+	"database/sql/driver"
+	"encoding/binary"
 	"errors"
 	"github.com/stretchr/testify/assert"
 	"io"
@@ -402,4 +404,191 @@ func Test_appendMicrosecs_decimals_6(t *testing.T){
 	src:=[]byte("123456")
 	d:=appendMicrosecs(dst,src,6)
 	assert.New(t).Equal(string(d),string(dst)+".250417")
+}
+
+func Test_escapeBytesQuotes(t *testing.T){
+	buf :=[]byte("12345")
+	src:=[]byte("'\abc")
+	dst:=escapeBytesQuotes(buf,src)
+	assert.New(t).Equal(len(dst),10)
+}
+
+func Test_escapeStringQuotes(t *testing.T) {
+	buf :=[]byte("12345")
+	src :="'\abc"
+	dst:=escapeStringQuotes(buf,src)
+	assert.New(t).Equal(len(dst),10)
+}
+
+func Test_escapeBytesBackslash(t *testing.T){
+	buf:=[]byte("12345")
+	var src []byte
+	src=append(src,'\x00','\n','\r','\x1a','\'','"','\\','a')
+	dst:=escapeBytesBackslash(buf,src)
+	assert.New(t).Equal(len(dst),20)
+}
+
+func Test_escapeStringBackslash(t *testing.T){
+	buf:=[]byte("12345")
+	var src []byte
+	src=append(src,'\x00','\n','\r','\x1a','\'','"','\\','a')
+	dst:=escapeStringBackslash(buf,string(src))
+	assert.New(t).Equal(len(dst),20)
+}
+
+func Test_namedValueToValue_ret_error(t *testing.T) {
+	var input []driver.NamedValue
+
+	input = append(input,driver.NamedValue{
+		Name:"test",
+	})
+	d,err:=namedValueToValue(input)
+	ast:=assert.New(t)
+	ast.Nil(d)
+	ast.NotNil(err)
+}
+
+func Test_namedValueToValue_ret_nil(t *testing.T) {
+	var input []driver.NamedValue
+
+	input = append(input,driver.NamedValue{
+		Name:"",
+		Value: 10,
+	})
+	d,err:=namedValueToValue(input)
+	ast:=assert.New(t)
+	ast.Equal(len(d),1)
+	ast.Nil(err)
+}
+
+func Test_mapIsolationLevel(t *testing.T) {
+	type args struct {
+		level driver.IsolationLevel
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		wantErr bool
+	}{
+		{
+			name:"LevelRepeatableRead",
+			args:args{
+				level:driver.IsolationLevel(4),
+			},
+			want:"REPEATABLE READ",
+			wantErr: false,
+		},
+		{
+			name:"LevelReadCommitted",
+			args:args{
+				level:driver.IsolationLevel(2),
+			},
+			want:"READ COMMITTED",
+			wantErr: false,
+		},
+		{
+			name:"LevelReadUncommitted",
+			args:args{
+				level:driver.IsolationLevel(1),
+			},
+			want:"READ UNCOMMITTED",
+			wantErr: false,
+		},
+		{
+			name:"LevelSerializable",
+			args:args{
+				level:driver.IsolationLevel(6),
+			},
+			want:"SERIALIZABLE",
+			wantErr: false,
+		},
+		{
+			name:"LevelSerializable",
+			args:args{
+				level:driver.IsolationLevel(60),
+			},
+			want:"",
+			wantErr: true,
+		},
+	}
+		for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := mapIsolationLevel(tt.args.level)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("mapIsolationLevel() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("mapIsolationLevel() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+
+func Test_appendDateTime(t *testing.T){
+	var buf []byte
+	ts :=time.Now()
+	d,err:=appendDateTime(buf,ts)
+	ast:=assert.New(t)
+	ast.Equal(len(d),26)
+	ast.Nil(err)
+}
+
+func Test_parseBinaryDateTime_case_0(t *testing.T){
+	num:=uint64(0)
+	var data []byte
+	_,err := parseBinaryDateTime(num,data,time.UTC)
+	assert.New(t).Nil(err)
+}
+
+func Test_parseBinaryDateTime_case_4(t *testing.T){
+	num:=uint64(4)
+	data:=make([]byte,10,10)
+	binary.LittleEndian.PutUint16(data[0:], 2021)
+	data[2]=11
+	_,err := parseBinaryDateTime(num,data,time.UTC)
+	assert.New(t).Nil(err)
+}
+
+func Test_parseBinaryDateTime_case_7(t *testing.T){
+	num:=uint64(7)
+	data:=make([]byte,10,10)
+	binary.LittleEndian.PutUint16(data[0:], 2021)
+	data[2]=11
+	data[3]=24
+	data[4]=15
+	data[5]=5
+	data[6]=30
+	_,err := parseBinaryDateTime(num,data,time.UTC)
+	assert.New(t).Nil(err)
+}
+
+func Test_parseBinaryDateTime_case_11(t *testing.T){
+	num:=uint64(11)
+	data:=make([]byte,20,20)
+	binary.LittleEndian.PutUint16(data[0:], 2021)
+	data[2]=11
+	data[3]=24
+	data[4]=15
+	data[5]=5
+	data[6]=30
+	binary.LittleEndian.PutUint32(data[7:], 998990)
+	_,err := parseBinaryDateTime(num,data,time.UTC)
+	assert.New(t).Nil(err)
+}
+
+func Test_parseBinaryDateTime_case_12(t *testing.T){
+	num:=uint64(12)
+	data:=make([]byte,20,20)
+	binary.LittleEndian.PutUint16(data[0:], 2021)
+	data[2]=11
+	data[3]=24
+	data[4]=15
+	data[5]=5
+	data[6]=30
+	binary.LittleEndian.PutUint32(data[7:], 998990)
+	_,err := parseBinaryDateTime(num,data,time.UTC)
+	assert.New(t).NotNil(err)
 }
