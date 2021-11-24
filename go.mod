@@ -8,10 +8,12 @@ require (
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/google/gopacket v1.1.19
 	github.com/pingcap/errors v0.11.4
-	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
 	github.com/pkg/profile v1.6.0
+	github.com/radovskyb/watcher v1.0.7
 	github.com/satori/go.uuid v1.2.0
 	github.com/spf13/cobra v1.2.1
 	github.com/stretchr/testify v1.7.0
+	go.uber.org/atomic v1.9.0 // indirect
+	go.uber.org/multierr v1.7.0 // indirect
 	go.uber.org/zap v1.19.1
 )

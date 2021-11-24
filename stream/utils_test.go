@@ -9,8 +9,12 @@
 package stream
 
 import (
+	"errors"
 	"github.com/stretchr/testify/assert"
+	"io"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func Test_bToi_succ ( t *testing.T){
@@ -134,3 +138,268 @@ func Test_readLengthEncodedString_read_from_len_zero (t *testing.T){
 	ast.Nil(err)
 }
 
+func Test_skipLengthEncodedString_slice_len_zero(t *testing.T){
+	var s []byte
+	i,err:= skipLengthEncodedString(s)
+
+	ast:=assert.New(t)
+	ast.Equal(i,1)
+	ast.Nil(err)
+}
+
+func Test_skipLengthEncodedString_len_fb (t *testing.T){
+	s := make([]byte,0,10)
+	s=append(s,0xfb)
+	i,err:= skipLengthEncodedString(s)
+	ast:=assert.New(t)
+	ast.Equal(i,1)
+	ast.Nil(err)
+}
+
+func Test_skipLengthEncodedString_len_fc_return_EOF (t *testing.T){
+	s := make([]byte,0,10)
+	s=append(s,0xfc,1,2)
+
+	i,err:= skipLengthEncodedString(s)
+
+	ast:=assert.New(t)
+	ast.Equal(i,516)
+	ast.Equal(err,io.EOF)
+}
+
+func Test_skipLengthEncodedString_len_fc_return_nil (t *testing.T){
+	s := make([]byte,517,517)
+	s[0]=0xfc
+	s[1]=1
+	s[2]=2
+
+	i,err:= skipLengthEncodedString(s)
+
+	ast:=assert.New(t)
+	ast.Equal(i,516)
+	ast.Nil(err)
+}
+
+func Test_readLengthEncodedInteger_slice_len_zero(t *testing.T){
+	var s []byte
+	i,b,j:=readLengthEncodedInteger(s)
+	ast:= assert.New(t)
+	ast.Equal(i,uint64(0))
+	ast.Equal(j,1)
+	ast.True(b)
+}
+
+func Test_readLengthEncodedInteger_slice_len_fb(t *testing.T){
+	var s []byte
+	s=append(s,0xfb)
+	i,b,j:=readLengthEncodedInteger(s)
+	ast:= assert.New(t)
+	ast.Equal(i,uint64(0))
+	ast.Equal(j,1)
+	ast.True(b)
+}
+
+func Test_readLengthEncodedInteger_slice_len_fc(t *testing.T){
+	var s []byte
+	s=append(s,0xfc,1,2)
+	i,b,j:=readLengthEncodedInteger(s)
+	ast:= assert.New(t)
+	ast.Equal(i,uint64(513))
+	ast.Equal(j,3)
+	ast.False(b)
+}
+
+func Test_readLengthEncodedInteger_slice_len_fd(t *testing.T){
+	var s []byte
+	s=append(s,0xfd,1,2,3)
+	i,b,j:=readLengthEncodedInteger(s)
+	ast:= assert.New(t)
+	ast.Equal(i,uint64(197121))
+	ast.Equal(j,4)
+	ast.False(b)
+}
+
+func Test_readLengthEncodedInteger_slice_len_fe(t *testing.T){
+	var s []byte
+	s=append(s,0xfe,1,2,3,4,5,6,7,8)
+	i,b,j:=readLengthEncodedInteger(s)
+	ast:= assert.New(t)
+	ast.Equal(i,uint64(578437695752307201))
+	ast.Equal(j,9)
+	ast.False(b)
+}
+
+
+func Test_readLengthEncodedInteger_slice_len_16(t *testing.T){
+	var s []byte
+	s=append(s,16,1,2,3,4,5,6,7,8)
+	i,b,j:=readLengthEncodedInteger(s)
+	ast:= assert.New(t)
+	ast.Equal(i,uint64(16))
+	ast.Equal(j,1)
+	ast.False(b)
+}
+
+func Test_reserveBuffer_need_grow(t *testing.T){
+	s := make([]byte,0,10)
+	ns := reserveBuffer(s,20)
+	assert.New(t).Equal(cap(ns),20)
+}
+
+func Test_reserveBuffer_not_need_grow(t *testing.T){
+	s := make([]byte,0,30)
+	ns := reserveBuffer(s,20)
+	assert.New(t).Equal(len(ns),20)
+}
+
+func Test_atomicBool_IsSet(t *testing.T){
+	a := &atomicBool{
+		_noCopy:noCopy{},
+		value: 1,
+	}
+	b:=a.IsSet()
+	assert.New(t).True(b)
+}
+
+func Test_atomicBool_Set_true(t *testing.T){
+	a:=&atomicBool{
+		_noCopy:noCopy{},
+		value: 0,
+	}
+	a.Set(true)
+	assert.New(t).Equal(a.value,uint32(1))
+}
+func Test_atomicBool_Set_false(t *testing.T){
+	a:=&atomicBool{
+		_noCopy:noCopy{},
+		value: 0,
+	}
+	a.Set(false)
+	assert.New(t).Equal(a.value,uint32(0))
+}
+
+func Test_atomicBool_TrySet_true(t *testing.T){
+	a:=&atomicBool{
+		_noCopy:noCopy{},
+		value: 0,
+	}
+	b:=a.TrySet(true)
+	assert.New(t).True(b)
+}
+
+func Test_atomicBool_TrySet_false(t *testing.T){
+	a:=&atomicBool{
+		_noCopy:noCopy{},
+		value: 0,
+	}
+	b:=a.TrySet(false)
+	assert.New(t).False(b)
+}
+
+func Test_atomicError_set_error(t *testing.T){
+	a:=&atomicError{
+		_noCopy: noCopy{},
+		value: atomic.Value{},
+	}
+
+	a.Set(errors.New("errors happen"))
+	err:=a.Value()
+	assert.New(t).NotNil(err)
+}
+
+func Test_atomicError_value_nil(t *testing.T){
+	a:=&atomicError{
+		_noCopy: noCopy{},
+		value: atomic.Value{},
+	}
+	err:=a.Value()
+	assert.New(t).Nil(err)
+}
+
+func Test_readBool_true_true(t *testing.T){
+	input :="true"
+	a,b:=readBool(input)
+	assert.New(t).True(a)
+	assert.New(t).True(b)
+}
+
+func Test_readBool_true_false(t *testing.T){
+	input :="false"
+	a,b:=readBool(input)
+	assert.New(t).False(a)
+	assert.New(t).True(b)
+}
+
+func Test_readBool_true_other(t *testing.T){
+	input :="f"
+	a,b:=readBool(input)
+	assert.New(t).False(a)
+	assert.New(t).False(b)
+}
+
+func Test_parseDateTime(t *testing.T){
+	dateStr := []byte("2021-11-24 09:53:53.000000")
+
+	ts,err:= parseDateTime(dateStr,time.UTC)
+
+	ast:=assert.New(t)
+	ast.Equal(ts.String()[0:19],"2021-11-24 09:53:53")
+	ast.Nil(err)
+
+}
+
+
+func Test_appendMicrosecs_decimals_eq_zero(t *testing.T){
+	dst:=[]byte("2021-11-24 10:10:00")
+	src:=[]byte("123456")
+	d:=appendMicrosecs(dst,src,0)
+	assert.New(t).Equal(string(d),string(dst))
+}
+
+func Test_appendMicrosecs_src_len_zero(t *testing.T){
+	dst:=[]byte("2021-11-24 10:10:00")
+	src:=[]byte("")
+	d:=appendMicrosecs(dst,src,6)
+	assert.New(t).Equal(string(d),string(dst)+".000000")
+}
+
+func Test_appendMicrosecs_decimals_1(t *testing.T){
+	dst:=[]byte("2021-11-24 10:10:00")
+	src:=[]byte("123456")
+	d:=appendMicrosecs(dst,src,1)
+	assert.New(t).Equal(string(d),string(dst)+".2")
+}
+
+func Test_appendMicrosecs_decimals_2(t *testing.T){
+	dst:=[]byte("2021-11-24 10:10:00")
+	src:=[]byte("123456")
+	d:=appendMicrosecs(dst,src,2)
+	assert.New(t).Equal(string(d),string(dst)+".25")
+}
+
+func Test_appendMicrosecs_decimals_3(t *testing.T){
+	dst:=[]byte("2021-11-24 10:10:00")
+	src:=[]byte("123456")
+	d:=appendMicrosecs(dst,src,3)
+	assert.New(t).Equal(string(d),string(dst)+".250")
+}
+
+func Test_appendMicrosecs_decimals_4(t *testing.T){
+	dst:=[]byte("2021-11-24 10:10:00")
+	src:=[]byte("123456")
+	d:=appendMicrosecs(dst,src,4)
+	assert.New(t).Equal(string(d),string(dst)+".2504")
+}
+
+func Test_appendMicrosecs_decimals_5(t *testing.T){
+	dst:=[]byte("2021-11-24 10:10:00")
+	src:=[]byte("123456")
+	d:=appendMicrosecs(dst,src,5)
+	assert.New(t).Equal(string(d),string(dst)+".25041")
+}
+func Test_appendMicrosecs_decimals_6(t *testing.T){
+	dst:=[]byte("2021-11-24 10:10:00")
+	src:=[]byte("123456")
+	d:=appendMicrosecs(dst,src,6)
+	assert.New(t).Equal(string(d),string(dst)+".250417")
+}
