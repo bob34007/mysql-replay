@@ -26,7 +26,7 @@ func (c *Context) GetCaptureInfo() gopacket.CaptureInfo {
 
 
 func HandlePcapFile(name string, ts time.Time, rt uint32, ticker *time.Ticker,
-	assembler *reassembly.Assembler,lastFlushTime *time.Time,flushIneterval time.Duration) error {
+	assembler *reassembly.Assembler,lastFlushTime *time.Time,flushIneterval time.Duration,log *zap.Logger) error {
 	fmt.Println("process file ",name)
 	var f *pcap.Handle
 	var err error
@@ -40,7 +40,7 @@ func HandlePcapFile(name string, ts time.Time, rt uint32, ticker *time.Ticker,
 	for pkt := range src.Packets() {
 		if meta := pkt.Metadata(); meta != nil && meta.Timestamp.Sub(*lastFlushTime) > flushIneterval {
 			flushed,closed:=assembler.FlushCloseOlderThan(*lastFlushTime)
-			fmt.Println(fmt.Sprintf("flush old connect fulshed:%v,closed:%v",flushed,closed))
+			log.Info(fmt.Sprintf("flush old connect fulshed:%v,closed:%v",flushed,closed))
 			*lastFlushTime = meta.Timestamp
 		}
 
@@ -98,3 +98,4 @@ func getFirstFileName(files map[string]int) string {
 
 	return fileName
 }
+

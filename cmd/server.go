@@ -54,27 +54,45 @@ func HandleQueryStats(w http.ResponseWriter, r *http.Request) {
 	qs.FileNameSeqNO = util.GetFileNameSeq()
 	qs.WriteDoneFileNum ,err  = util.GetFileNumFromPath(strDir)
 	if err !=nil{
-		w.Write([]byte(err.Error()))
+		_,err = w.Write([]byte(err.Error()))
+		if err !=nil{
+			logger.Warn("write response file,"+err.Error())
+		}
 		return
 	}
 	qs.WriteDoneFileSize,err = util.GetFileSizeFromPath(strDir)
 	if err !=nil{
-		w.Write([]byte(err.Error()))
+		_,err = w.Write([]byte(err.Error()))
+		if err !=nil{
+			logger.Warn("write response file,"+err.Error())
+		}
 		return
 	}
 	qs.WritingFileNum,err = util.GetFileNumFromPath(outDir)
 	if err !=nil{
-		w.Write([]byte(err.Error()))
+		_,err = w.Write([]byte(err.Error()))
+		if err !=nil{
+			logger.Warn("write response file,"+err.Error())
+		}
 	}
 	qs.WritingFileSize,err = util.GetFileSizeFromPath(outDir)
 	if err !=nil{
-		w.Write([]byte(err.Error()))
+		_,err = w.Write([]byte(err.Error()))
+		if err !=nil{
+			logger.Warn("write response file,"+err.Error())
+		}
 	}
 	js , err:= json.Marshal(qs)
 	if err !=nil{
-		w.Write([]byte(err.Error()))
+		_,err = w.Write([]byte(err.Error()))
+		if err !=nil{
+			logger.Warn("write response file,"+err.Error())
+		}
 	} else {
-		w.Write(js)
+		_,err = w.Write(js)
+		if err !=nil{
+			logger.Warn("write response file,"+err.Error())
+		}
 	}
 
 }
@@ -83,7 +101,10 @@ func HandleExit(w http.ResponseWriter, r *http.Request){
 	logger.Info("request exit from " + r.Host )
 	defer logger.Info("response exit to " + r.Host )
 	logger.Info("receive exit message from ")
-	w.Write([]byte("ok!"))
+	_,err := w.Write([]byte("ok!"))
+	if err !=nil {
+		logger.Warn("write response file," + err.Error())
+	}
 	os.Exit(0)
 }
 
@@ -95,6 +116,9 @@ func AddPortListenAndServer(port uint16,outputDir ,storeDir string ){
 	http.HandleFunc("/stats", HandleQueryStats)
 	http.HandleFunc("/exit", HandleExit)
 
-	http.ListenAndServe(generateListenStr(port), nil)
+	err:= http.ListenAndServe(generateListenStr(port), nil)
+	if err !=nil{
+		logger.Warn(fmt.Sprintf("listen port:%v fail ,%v",port,err.Error()))
+	}
 
 }

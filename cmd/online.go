@@ -35,11 +35,10 @@ import (
 	"github.com/google/gopacket/reassembly"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-	//"strconv"
 	"time"
 )
 
-const MAXPACKETLEN = 16 * 1024 * 1024
+//const MAXPACKETLEN = 16 * 1024 * 1024
 
 func NewOnlineCommand() *cobra.Command {
 	//add sub command replay
@@ -138,131 +137,55 @@ func trafficCapture(device string, port uint16,
 	//return nil
 }
 
-func trafficCapture1(device string, port uint16,
-	dsn, outputDir, tmpDir string, MySQLCfg *mysql.Config,
-	preFileSize uint64, options stream.FactoryOptions,
-	lastFlushTime *time.Time, flushInterval time.Duration,
-	runTime uint32, log *zap.Logger) error {
-
-	var packetNum uint64
-	var InvalidMsgPktNum uint64
-	ts := time.Now()
-	handle, err := pcap.OpenLive(device, MAXPACKETLEN, false, pcap.BlockForever)
-	if err != nil {
-		return err
-	}
-	defer handle.Close()
-
-	//set filter
-	filter := getFilter(port)
-	log.Info("SetBPFFilter " + filter)
-	err = handle.SetBPFFilter(filter)
-	if err != nil {
-		return err
-	}
-
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	// Process packet here
-	factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
-		logger := conn.Logger("replay")
-		return replay.NewReplayEventHandler(conn, logger, dsn, MySQLCfg, outputDir, tmpDir, preFileSize)
-	}, options)
-	pool := reassembly.NewStreamPool(factory)
-	assembler := reassembly.NewAssembler(pool)
-
-	for pkt := range packetSource.Packets() {
-		if time.Since(ts).Seconds() > float64(runTime*60) {
-			logger.Warn("program run timeout , " + fmt.Sprintf("%v", int64(runTime*60)))
-			return ERRORTIMEOUT
-		}
-		if meta := pkt.Metadata(); meta != nil && meta.Timestamp.Sub(*lastFlushTime) > flushInterval {
-			flushed, closed := assembler.FlushCloseOlderThan(*lastFlushTime)
-			logger.Warn(fmt.Sprintf("flushed old connect %v-%v-%v-%v", flushed, closed, *lastFlushTime, flushInterval))
-			*lastFlushTime = meta.Timestamp
-		}
-
-		layer := pkt.Layer(layers.LayerTypeTCP)
-		if layer == nil {
-			log.Error("pkt.Layer id is nil")
-			continue
-		}
-		tcp := layer.(*layers.TCP)
-		if tcp.DstPort != layers.TCPPort(port) && tcp.SrcPort != layers.TCPPort(port) {
-			InvalidMsgPktNum++
-			if InvalidMsgPktNum%100000 == 0 {
-				log.Info("receive invalid message packet num : " + fmt.Sprintf("%v", InvalidMsgPktNum))
-			}
-			continue
-		}
-
-		packetNum++
-		if packetNum%100000 == 0 {
-			log.Warn("receive packet num : " + fmt.Sprintf("%v", packetNum))
-		}
-		assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
-	}
-	return nil
-}
-
-
 
 func NewOnlineReplayCommand() *cobra.Command {
 	//Replay sql from online net packet
 	var (
 		options       = stream.FactoryOptions{Synchronized: true}
-		dsn           string
-		runTime       uint32
-		outputDir     string
-		//flushInterval time.Duration
-		preFileSize   uint64
-		deviceName    string
-		srcPort       uint16
-		storeDir      string
-		listenPort    uint16
+		cfg = &util.Config{RunType: util.RunOnline}
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
 		Short: "Replay online packet",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			preFileSize = preFileSize * 1024 * 1024
-			logName := generateLogName(deviceName, srcPort)
-			log := zap.L().Named(logName)
-			log.Info("process begin run at " + time.Now().String())
-
-			go printTime(log)
+			cfg.PreFileSize = cfg.PreFileSize * 1024 * 1024
+			logName := generateLogName(cfg.DeviceName, cfg.SrcPort)
+			cfg.Log = zap.L().Named(logName)
+			cfg.Log.Info("process begin run at " + time.Now().String())
 
 			ts := time.Now()
 
-			MySQLCfg, err := util.CheckParamValid(dsn, outputDir,storeDir)
+			err := cfg.CheckParamValid()
 			if err != nil {
-				log.Error("parse param error , " + err.Error())
+				cfg.Log.Error("parse param error , " + err.Error())
 				return nil
 			}
 
-			go AddPortListenAndServer(listenPort, outputDir, storeDir)
+			go printTime(cfg.Log)
+			go AddPortListenAndServer(cfg.ListenPort, cfg.OutputDir, cfg.StoreDir)
 			//handle online packet
-			err = trafficCapture(deviceName, srcPort, dsn, outputDir, storeDir, MySQLCfg, preFileSize,
-				options,  runTime, log)
+			err = trafficCapture(cfg.DeviceName, cfg.SrcPort, cfg.Dsn, cfg.OutputDir, cfg.StoreDir, cfg.MySQLConfig, cfg.PreFileSize,
+				options,  cfg.RunTime, cfg.Log)
 			if err != nil && err != ERRORTIMEOUT {
 				return err
 			} else if err == ERRORTIMEOUT {
-				log.Info("process time to stop ,start at :" + ts.String() + " end at :" + time.Now().String() +
-					" specify running time : " + fmt.Sprintf("%vs", runTime*60))
+				cfg.Log.Info("process time to stop ,start at :" + ts.String() + " end at :" + time.Now().String() +
+					" specify running time : " + fmt.Sprintf("%vs", cfg.RunTime*60))
 				return nil
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&dsn, "dsn", "d", "", "replay server dsn")
+	cmd.Flags().StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
-	cmd.Flags().Uint32VarP(&runTime, "runtime", "t", 0, "replay server run time")
-	cmd.Flags().StringVarP(&outputDir, "output", "o", "./output", "directory used to write the result set ")
+	cmd.Flags().Uint32VarP(&cfg.RunTime, "runtime", "t", 0, "replay server run time")
+	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set ")
 	//cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute*10, "flush interval")
-	cmd.Flags().StringVarP(&deviceName, "device", "D", "eth0", "device name")
-	cmd.Flags().StringVarP(&storeDir, "storeDir", "S", "", "save result dir")
-	cmd.Flags().Uint16VarP(&srcPort, "srcPort", "P", 4000, "server port")
-	cmd.Flags().Uint64VarP(&preFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
-	cmd.Flags().Uint16VarP(&listenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
+	cmd.Flags().StringVarP(&cfg.DeviceName, "device", "D", "eth0", "device name")
+	cmd.Flags().StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
+	cmd.Flags().Uint16VarP(&cfg.SrcPort, "srcPort", "P", 4000, "server port")
+	cmd.Flags().Uint64VarP(&cfg.PreFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
+	cmd.Flags().Uint16VarP(&cfg.ListenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
 	return cmd
 }

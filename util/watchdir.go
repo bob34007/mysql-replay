@@ -45,7 +45,7 @@ func WatchDirCreateFile(ctx context.Context, filePath string,
 	// Only notify rename and move events.
 	w.FilterOps(watcher.Create)
 
-	go func() error {
+	go func()  {
 		for {
 			select {
 			case event := <-w.Event:
@@ -56,10 +56,10 @@ func WatchDirCreateFile(ctx context.Context, filePath string,
 				log.Error(err.Error())
 				continue
 			case <-w.Closed:
-				return nil
+				return
 			case <-ctx.Done():
 				w.Close()
-				return nil
+				return
 			}
 		}
 	}()

@@ -210,7 +210,7 @@ func (s *mysqlStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.A
 			}
 		}
 		if pkt.Seq == -1 || buf.Len() < pkt.Len+4 {
-			s.log.Warn("wait for more packet data", zap.String("dir", dir.String()),
+			s.log.Debug("wait for more packet data", zap.String("dir", dir.String()),
 				zap.String("msg", fmt.Sprintf("pkt seq is %v,pkt len %v,buf len %v",
 					pkt.Seq, pkt.Len, buf.Len())))
 			if s.getPkt(dir) == nil && pkt.Seq >= 0 {

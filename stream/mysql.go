@@ -251,7 +251,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		fsm.setStatusWithNoChange(StateSkipPacket)
 		//fsm.setStatusWithNoChange(StateInit)
 		stateChgAfter := StateName(fsm.State())
-		fsm.log.Warn("pkt seq is not correct "+
+		fsm.log.Debug("pkt seq is not correct "+
 			fmt.Sprintf("%v-%v,%v-%v",fsm.nextSeq(),pkt.Seq,stateChgBefore,stateChgAfter))
 		return
 	}

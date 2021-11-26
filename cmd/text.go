@@ -28,44 +28,41 @@ func NewTextDumpReplayCommand() *cobra.Command {
 	//replay server
 	var (
 		options   = stream.FactoryOptions{Synchronized: true}
-		dsn       string
-		runTime   uint32
-		outputDir string
-		storeDir  string
-		flushInterval time.Duration
-		preFileSize uint64
-		listenPort uint16
+		cfg = &util.Config{RunType: util.RunText}
 	)
 	cmd := &cobra.Command{
 		Use:   "replay",
 		Short: "Replay pcap files",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
-			preFileSize = preFileSize *1024 *1024
+			cfg.PreFileSize = cfg.PreFileSize *1024 *1024
 			log := zap.L().Named("text-replay")
-			log.Info("process begin run at " + time.Now().String())
+			cfg.Log.Info("process begin run at " + time.Now().String())
 			if len(args) == 0 {
 				return cmd.Help()
 			}
 
 			ts := time.Now()
 			var ticker *time.Ticker
-			MySQLCfg, err := util.CheckParamValid(dsn,  outputDir,storeDir)
+			err = cfg.CheckParamValid()
 			if err != nil {
 				log.Error("parse param error , " + err.Error())
 				return nil
 			}
-			go printTime(log)
-			go AddPortListenAndServer(listenPort,outputDir, storeDir)
 
-			if runTime > 0 {
+
+			go printTime(log)
+			go AddPortListenAndServer(cfg.ListenPort,cfg.OutputDir, cfg.StoreDir)
+
+			if cfg.RunTime > 0 {
 				ticker = time.NewTicker(3 * time.Second)
 				defer ticker.Stop()
 			}
 
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 				logger := conn.Logger("replay")
-				return replay.NewReplayEventHandler(conn,logger,dsn,MySQLCfg,outputDir,storeDir,preFileSize)
+				return replay.NewReplayEventHandler(conn,logger,cfg.Dsn,cfg.MySQLConfig,cfg.OutputDir,
+					cfg.StoreDir,cfg.PreFileSize)
 			}, options)
 
 			pool := reassembly.NewStreamPool(factory)
@@ -75,7 +72,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 
 			for _, in := range args {
 				zap.L().Info("processing " + in)
-				err = HandlePcapFile(in, ts, runTime, ticker, assembler,&lastFlushTime,flushInterval)
+				err = HandlePcapFile(in, ts, cfg.RunTime, ticker, assembler,&lastFlushTime,cfg.FlushInterval,log)
 				if err != nil && err != ERRORTIMEOUT {
 					return err
 				} else if err == ERRORTIMEOUT {
@@ -91,14 +88,14 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&dsn, "dsn", "d", "", "replay server dsn")
+	cmd.Flags().StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
-	cmd.Flags().Uint32VarP(&runTime, "runtime", "t", 0, "replay server run time")
-	cmd.Flags().StringVarP(&outputDir, "output", "o", "./output", "directory used to write the result set")
-	cmd.Flags().StringVarP(&storeDir, "storeDir", "S", "", "save result dir")
-	cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute, "flush interval")
-	cmd.Flags().Uint64VarP(&preFileSize,"filesize","s",UINT64MAX,"Baseline size per document , unit M")
-	cmd.Flags().Uint16VarP(&listenPort, "listen-port", "P", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
+	cmd.Flags().Uint32VarP(&cfg.RunTime, "runtime", "t", 0, "replay server run time")
+	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set")
+	cmd.Flags().StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
+	cmd.Flags().DurationVar(&cfg.FlushInterval, "flush-interval", time.Minute, "flush interval")
+	cmd.Flags().Uint64VarP(&cfg.PreFileSize,"filesize","s",UINT64MAX,"Baseline size per document , unit M")
+	cmd.Flags().Uint16VarP(&cfg.ListenPort, "listen-port", "P", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
 
 	return cmd
 }
