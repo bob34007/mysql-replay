@@ -40,7 +40,7 @@ func WatchDirCreateFile(ctx context.Context, filePath string,
 	// on the Event channel per watching cycle.
 	//
 	// If SetMaxEvents is not set, the default is to send all events.
-	w.SetMaxEvents(1)
+	//w.SetMaxEvents(1)
 
 	// Only notify rename and move events.
 	w.FilterOps(watcher.Create)

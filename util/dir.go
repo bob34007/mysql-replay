@@ -42,8 +42,8 @@ func CreateTempFileNameByUUID() string {
 //successfully creating temporary files under the directory ,
 //will remove file before return
 func CheckDirPrivileges(path string) (bool, error) {
-	uuid := CreateTempFileNameByUUID()
-	fileName := fmt.Sprintf("%s/.%s-temp", path, uuid)
+	uuidStr := CreateTempFileNameByUUID()
+	fileName := fmt.Sprintf("%s/.%s-temp", path, uuidStr)
 	file, err := os.Create(fileName)
 	if err != nil {
 		log.Error(" create file for check dir privileges fail , "+err.Error())
