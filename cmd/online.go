@@ -28,7 +28,6 @@ import (
 	"github.com/bobguo/mysql-replay/replay"
 	"github.com/bobguo/mysql-replay/stream"
 	"github.com/bobguo/mysql-replay/util"
-	"github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -59,23 +58,20 @@ func getFilter(port uint16) string {
 	return filter
 }
 
-func trafficCapture(device string, port uint16,
-	dsn, outputDir, storeDir string, MySQLCfg *mysql.Config,
-	preFileSize uint64, options stream.FactoryOptions,
-	runTime uint32, log *zap.Logger) error {
+func trafficCapture(cfg *util.Config,options stream.FactoryOptions) error {
 
 	var packetNum uint64
 	//var InvalidMsgPktNum uint64
 	ts := time.Now()
-	handle, err := pcap.OpenLive(device, 65535, false, pcap.BlockForever)
+	handle, err := pcap.OpenLive(cfg.DeviceName, 65535, false, pcap.BlockForever)
 	if err != nil {
 		return err
 	}
 	defer handle.Close()
 
 	//set filter
-	filter := getFilter(port)
-	log.Info("SetBPFFilter " + filter)
+	filter := getFilter(cfg.SrcPort)
+	cfg.Log.Info("SetBPFFilter " + filter)
 	err = handle.SetBPFFilter(filter)
 	if err != nil {
 		return err
@@ -86,7 +82,7 @@ func trafficCapture(device string, port uint16,
 	// Process packet here
 	factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 		logger := conn.Logger("replay")
-		return replay.NewReplayEventHandler(conn, logger, dsn, MySQLCfg, outputDir, storeDir, preFileSize)
+		return replay.NewReplayEventHandler(conn, logger, cfg)
 	}, options)
 
 	pool := reassembly.NewStreamPool(factory)
@@ -105,29 +101,29 @@ func trafficCapture(device string, port uint16,
 			}
 			layer := pkt.Layer(layers.LayerTypeTCP)
 			if layer == nil {
-				log.Error("pkt.Layer is nil")
+				cfg.Log.Error("pkt.Layer is nil")
 				continue
 			}
 			tcp := layer.(*layers.TCP)
 
 			packetNum++
 			if packetNum%100000 == 0 {
-				log.Warn("receive packet num : " + fmt.Sprintf("%v", packetNum))
+				cfg.Log.Warn("receive packet num : " + fmt.Sprintf("%v", packetNum))
 			}
 			assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp,
 				captureContext(pkt.Metadata().CaptureInfo))
 
 		case <-ticker.C:
-			if time.Since(ts).Seconds() > float64(runTime*60) {
-				logger.Warn("program run timeout , " + fmt.Sprintf("%v", int64(runTime*60)))
+			if time.Since(ts).Seconds() > float64(cfg.RunTime*60) {
+				cfg.Log.Warn("program run timeout , " + fmt.Sprintf("%v", int64(cfg.RunTime*60)))
 				return ERRORTIMEOUT
 			}
 
 			stats, err := handle.Stats()
-			logger.Warn(fmt.Sprintf("flushing all streams that haven't seen"+
+			cfg.Log.Warn(fmt.Sprintf("flushing all streams that haven't seen"+
 				" packets in the last 2 minutes, pcap stats: %+v %v", stats, err))
 			flushed, closed := assembler.FlushCloseOlderThan(time.Now().Add(-2*time.Minute))
-			logger.Warn(fmt.Sprintf("flushed old connect %v-%v", flushed, closed))
+			cfg.Log.Warn(fmt.Sprintf("flushed old connect %v-%v", flushed, closed))
 		default :
 			//
 		}
@@ -164,8 +160,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 			go printTime(cfg.Log)
 			go AddPortListenAndServer(cfg.ListenPort, cfg.OutputDir, cfg.StoreDir)
 			//handle online packet
-			err = trafficCapture(cfg.DeviceName, cfg.SrcPort, cfg.Dsn, cfg.OutputDir, cfg.StoreDir, cfg.MySQLConfig, cfg.PreFileSize,
-				options,  cfg.RunTime, cfg.Log)
+			err = trafficCapture(cfg,options)
 			if err != nil && err != ERRORTIMEOUT {
 				return err
 			} else if err == ERRORTIMEOUT {

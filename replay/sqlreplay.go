@@ -29,6 +29,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"github.com/bobguo/mysql-replay/result"
+	"github.com/bobguo/mysql-replay/stats"
 	"github.com/bobguo/mysql-replay/stream"
 	"github.com/bobguo/mysql-replay/util"
 	"github.com/go-sql-driver/mysql"
@@ -47,13 +48,12 @@ type statement struct {
 	handle *sql.Stmt
 }
 
-func NewReplayEventHandler(conn stream.ConnID,log *zap.Logger, dsn string,
-	mysqlCfg *mysql.Config,filePath ,storePath string, preFileSize uint64) *ReplayEventHandler {
+func NewReplayEventHandler(conn stream.ConnID,log *zap.Logger, cfg *util.Config) *ReplayEventHandler {
 	return &ReplayEventHandler{
 		pconn:       conn,
 		log:         log,
-		dsn:         dsn,
-		MySQLConfig: mysqlCfg,
+		dsn:         cfg.Dsn,
+		MySQLConfig: cfg.MySQLConfig,
 		ctx:         context.Background(),
 		ch:          make(chan stream.MySQLEvent, 10000),
 		wg:          new(sync.WaitGroup),
@@ -61,9 +61,10 @@ func NewReplayEventHandler(conn stream.ConnID,log *zap.Logger, dsn string,
 		once:        new(sync.Once),
 		wf:          NewWriteFile(),
 		fileNamePrefix: conn.HashStr()+":"+ conn.SrcAddr(),
-		filePath: filePath,
-		storePath : storePath,
-		preFileSize: preFileSize,
+		filePath: cfg.OutputDir,
+		storePath : cfg.StoreDir,
+		preFileSize: cfg.PreFileSize,
+		cfg:cfg,
 	}
 }
 
@@ -99,6 +100,7 @@ type ReplayEventHandler struct {
 	storePath string
 	preFileSize uint64
 	pos uint64
+	cfg *util.Config
 }
 
 type WriteFile struct {
@@ -196,6 +198,7 @@ func (h *ReplayEventHandler) DoWriteResToFile() {
 					h.log.Warn("write compare result to file fail , " + err.Error())
 				}
 			}
+			stats.AddStatic("WriteRes",1,false)
 			if h.CheckIfChangeFile(){
 				err= h.CloseAndBackupFile()
 				if err !=nil{
@@ -229,6 +232,8 @@ func (h *ReplayEventHandler) AsyncWriteResToFile(e stream.MySQLEvent) {
 			go h.DoWriteResToFile()
 		})
 	h.wf.ch <- e
+	stats.AddStatic("GetRes",1,false)
+	stats.AddStatic("WritResChanLen",uint64(len(h.wf.ch)),true)
 	/*
 	if len(h.wf.ch) >90000 && len(h.wf.ch)% 1000 ==0{
 		h.log.Warn("write Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.wf.ch),100000))
@@ -262,6 +267,7 @@ func (h *ReplayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.Wai
 					e.Rr.ErrDesc = "Failed to execute SQL and failed to convert to mysql error"
 				}
 			}
+			stats.AddStatic("DealSQL",1,false)
 			h.AsyncWriteResToFile(e)
 		} else {
 			wg.Done()
@@ -285,6 +291,8 @@ func (h *ReplayEventHandler) OnEvent(e stream.MySQLEvent) {
 		go h.ReplayEvent(h.ch, h.wg)
 	})
 	h.ch <- e
+	stats.AddStatic("GetSQL",1,false)
+	stats.AddStatic("SQLChanLen",uint64(len(h.ch)),true)
 	/*if len(h.ch) >90000 && len(h.ch)% 1000 ==0{
 		h.log.Warn("sql Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.ch),100000))
 	}*/

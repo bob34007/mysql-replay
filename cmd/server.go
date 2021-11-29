@@ -1,3 +1,18 @@
+/*
+ * Copyright (c)  2021 PingCAP, Inc.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 /**
  * @Author: guobob
  * @Description:
@@ -11,6 +26,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/bobguo/mysql-replay/stats"
 	"github.com/bobguo/mysql-replay/util"
 	"go.uber.org/zap"
 	"net/http"
@@ -33,8 +49,6 @@ func generateListenStr(port uint16) string {
 
 }
 
-
-
 type QueryStats struct {
 	RunTime int64 `json:"runtime"`
 	FileNameSeqNO int64 `json:"file_name_seq_no"`
@@ -42,8 +56,29 @@ type QueryStats struct {
 	WriteDoneFileSize int64 `json:"write_end_file_size"`
 	WritingFileNum  int64 `json:"writing_file_num"`
 	WritingFileSize int64 `json:"writing_file_size"`
+	GetPackets   uint64 `json:"get-packets"`
+	HandlePackets uint64 `json:"handle_packets"`
+	GetSQL    uint64 `json:"get_sql"`
+	DealSQL   uint64 `json:"handle_sql"`
+	GetRes    uint64 `json:"get_res"`
+	WriteRes  uint64 `json:"write_res"`
+	PacketChanLen uint64 `json:"packet_chan_len"`
+	SQLChanLen uint64 `json:"sql_chan_len"`
+	WritResChanLen uint64 `json:"writ_res_chan_len"`
 }
 
+
+func getStatic(qs *QueryStats){
+	qs.GetPackets = stats.GetValue("ReadPacket")
+	qs.HandlePackets =stats.GetValue("DealPacket")
+	qs.GetSQL =stats.GetValue("GetSQL")
+	qs.DealSQL = stats.GetValue("DealSQL")
+	qs.GetRes = stats.GetValue("GetRes")
+	qs.WriteRes = stats.GetValue("WriteRes")
+	qs.PacketChanLen=stats.GetValue("PacketChanLen")
+	qs.SQLChanLen = stats.GetValue("SQLChanLen")
+	qs.WritResChanLen=stats.GetValue("WritResChanLen")
+}
 
 func HandleQueryStats(w http.ResponseWriter, r *http.Request) {
 	logger.Info("request query stats from " + r.Host )
@@ -82,6 +117,8 @@ func HandleQueryStats(w http.ResponseWriter, r *http.Request) {
 			logger.Warn("write response file,"+err.Error())
 		}
 	}
+	getStatic(qs)
+
 	js , err:= json.Marshal(qs)
 	if err !=nil{
 		_,err = w.Write([]byte(err.Error()))
@@ -94,6 +131,9 @@ func HandleQueryStats(w http.ResponseWriter, r *http.Request) {
 			logger.Warn("write response file,"+err.Error())
 		}
 	}
+
+
+
 
 }
 

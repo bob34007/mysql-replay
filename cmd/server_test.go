@@ -9,6 +9,9 @@
 package cmd
 
 import (
+	"errors"
+	"github.com/agiledragon/gomonkey"
+	"net/http"
 	"testing"
 )
 
@@ -37,3 +40,37 @@ func Test_generateListenStr(t *testing.T) {
 		})
 	}
 }
+
+/*
+func Test_HandleQueryStats_GetFileNumFromPath_fail(t *testing.T){
+	w := new(http.ResponseWriter)
+	r:=new(http.Request)
+	//err := errors.New("get file num from path fail ")
+
+	patch := gomonkey.ApplyFunc(util.GetFileNameSeq, func() int64{
+		return 0
+	})
+	defer patch.Reset()
+	HandleQueryStats(*w,r)
+
+}
+*/
+
+func Test_getStatic (t *testing.T){
+	qs:=new(QueryStats)
+	getStatic(qs)
+}
+
+func Test_AddPortListenAndServer( t *testing.T){
+	port := uint16(7002)
+	outputDir :="./"
+	storeDir := "./"
+	err := errors.New("add listen port fail")
+	patch := gomonkey.ApplyFunc(http.ListenAndServe,func (addr string, handler http.Handler) error {
+		return err
+	})
+	defer patch.Reset()
+	AddPortListenAndServer(port,outputDir,storeDir)
+
+}
+

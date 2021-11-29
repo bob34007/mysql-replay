@@ -3,6 +3,7 @@ package stream
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/bobguo/mysql-replay/stats"
 	"strconv"
 	"strings"
 
@@ -444,6 +445,7 @@ func (h *eventHandler)AsyncParsePacket(){
 			if e==nil{
 				continue
 			}
+			stats.AddStatic("DealPacket",1,false)
 			e.Pr = h.fsm.pr
 			h.fsm.pr = nil
 			h.impl.OnEvent(*e)
@@ -464,9 +466,13 @@ func (h *eventHandler) OnPacket(pkt MySQLPacket) {
 		go h.AsyncParsePacket()
 	})
 	h.fsm.c<- pkt
+	stats.AddStatic("ReadPacket",1,false)
+	stats.AddStatic("PacketChanLen",uint64(len(h.fsm.c)),true)
+	/*
 	if len(h.fsm.c) >90000 && len(h.fsm.c)% 1000 ==0 {
 		h.fsm.log.Warn("packet Channel is nearly  full , " + fmt.Sprintf("%v-%v",len(h.fsm.c),100000))
 	}
+	*/
 }
 
 func (h *eventHandler) OnClose() {

@@ -7,7 +7,8 @@ require (
 	github.com/agiledragon/gomonkey v2.0.2+incompatible
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/google/gopacket v1.1.19
-	github.com/pingcap/errors v0.11.4
+	github.com/pingcap/errors v0.11.5-0.20210425183316-da1aaba5fb63
+	github.com/pingcap/tidb/parser v0.0.0-20211129063751-df113a124204
 	github.com/pkg/profile v1.6.0
 	github.com/radovskyb/watcher v1.0.7
 	github.com/satori/go.uuid v1.2.0

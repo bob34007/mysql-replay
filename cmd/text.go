@@ -42,44 +42,34 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				return cmd.Help()
 			}
 
-			ts := time.Now()
-			var ticker *time.Ticker
 			err = cfg.CheckParamValid()
 			if err != nil {
 				log.Error("parse param error , " + err.Error())
 				return nil
 			}
 
-
 			go printTime(log)
 			go AddPortListenAndServer(cfg.ListenPort,cfg.OutputDir, cfg.StoreDir)
 
-			if cfg.RunTime > 0 {
-				ticker = time.NewTicker(3 * time.Second)
-				defer ticker.Stop()
-			}
 
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 				logger := conn.Logger("replay")
-				return replay.NewReplayEventHandler(conn,logger,cfg.Dsn,cfg.MySQLConfig,cfg.OutputDir,
-					cfg.StoreDir,cfg.PreFileSize)
+				return replay.NewReplayEventHandler(conn,logger,cfg)
 			}, options)
-
 			pool := reassembly.NewStreamPool(factory)
 			assembler := reassembly.NewAssembler(pool)
 
 			lastFlushTime := time.Time{}
 
+
 			for _, in := range args {
 				zap.L().Info("processing " + in)
-				err = HandlePcapFile(in, ts, cfg.RunTime, ticker, assembler,&lastFlushTime,cfg.FlushInterval,log)
-				if err != nil && err != ERRORTIMEOUT {
+				err = HandlePcapFile(in, assembler,&lastFlushTime,cfg.FlushInterval,cfg.Log)
+				if err != nil {
 					return err
-				} else if err == ERRORTIMEOUT {
-					break
 				}
-				//assembler.FlushCloseOlderThan(factory.LastStreamTime().Add(-3 * time.Minute))
 			}
+
 			log.Info("read packet end ,begin close all goroutine")
 			i := assembler.FlushAll()
 			log.Info(fmt.Sprintf("read packet end ,end close all goroutine , %v groutine",i))
@@ -90,7 +80,7 @@ func NewTextDumpReplayCommand() *cobra.Command {
 
 	cmd.Flags().StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
-	cmd.Flags().Uint32VarP(&cfg.RunTime, "runtime", "t", 0, "replay server run time")
+	//cmd.Flags().Uint32VarP(&cfg.RunTime, "runtime", "t", 0, "replay server run time")
 	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set")
 	cmd.Flags().StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
 	cmd.Flags().DurationVar(&cfg.FlushInterval, "flush-interval", time.Minute, "flush interval")
