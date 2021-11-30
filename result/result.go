@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"github.com/bobguo/mysql-replay/stream"
+	"github.com/bobguo/mysql-replay/util"
 	"go.uber.org/zap"
 	"os"
 )
@@ -69,11 +70,11 @@ func NewResForWriteFile(pr *stream.PacketRes, rr *stream.ReplayRes,e *stream.MyS
 	rs.DB = e.DB
 	rs.Type =e.Type
 
-	if rs.Type == stream.EventQuery{
+	if rs.Type == util.EventQuery{
 		rs.Query = e.Query
 	}
 
-	if rs.Type == stream.EventStmtExecute {
+	if rs.Type == util.EventStmtExecute {
 		rs.StmtID = e.StmtID
 		rs.Params = rr.Values
 		rs.Query = rr.SqlStatment

@@ -27,23 +27,23 @@ func (c *Context) GetCaptureInfo() gopacket.CaptureInfo {
 	return c.CaptureInfo
 }
 
-func handlePcapFile(ctx context.Context,name string, cfg *util.Config, assembler *reassembly.Assembler,
-	lastFlushTime *time.Time,errChan chan error ,handleFileNum *int32)  {
+func handlePcapFile(ctx context.Context, name string, cfg *util.Config, assembler *reassembly.Assembler,
+	lastFlushTime *time.Time, errChan chan error, handleFileNum *int32) {
 	cfg.Log.Info("process file " + name)
 	var f *pcap.Handle
 	var err error
 	f, err = pcap.OpenOffline(name)
 	if err != nil {
 		cfg.Log.Error("open pcap file fail " + err.Error())
-		errChan<- err
+		errChan <- err
 	}
 	defer f.Close()
-	defer atomic.AddInt32(handleFileNum,-1)
+	defer atomic.AddInt32(handleFileNum, -1)
 	pkts := gopacket.NewPacketSource(f, f.LinkType()).Packets()
 	for {
 		select {
-		case pkt,ok := <-pkts:
-			if !ok{
+		case pkt, ok := <-pkts:
+			if !ok {
 				errChan <- nil
 				return
 			}
@@ -54,11 +54,10 @@ func handlePcapFile(ctx context.Context,name string, cfg *util.Config, assembler
 			}
 
 			layer := pkt.Layer(layers.LayerTypeTCP)
-			if layer == nil {
-				continue
+			if layer != nil {
+				tcp := layer.(*layers.TCP)
+				assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
 			}
-			tcp := layer.(*layers.TCP)
-			assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
 
 		case <-ctx.Done():
 			cfg.Log.Info("the program will exit ")
@@ -90,16 +89,15 @@ func HandlePcapFile(name string, assembler *reassembly.Assembler, lastFlushTime 
 		}
 
 		layer := pkt.Layer(layers.LayerTypeTCP)
-		if layer == nil {
-			continue
+		if layer != nil {
+			tcp := layer.(*layers.TCP)
+			assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
 		}
-		tcp := layer.(*layers.TCP)
-		assembler.AssembleWithContext(pkt.NetworkLayer().NetworkFlow(), tcp, captureContext(pkt.Metadata().CaptureInfo))
 	}
 	return nil
 }
 
-func printTime(log *zap.Logger) {
+func printTime() {
 	t := time.NewTicker(time.Second * 60)
 	ts := time.Now()
 	for {
@@ -133,7 +131,7 @@ func getFirstFileName(files map[string]int) string {
 	return fileName
 }
 
-func HandleSigs(sigs chan os.Signal,exits chan bool ) {
+func HandleSigs(sigs chan os.Signal, exits chan bool) {
 	<-sigs
 	exits <- true
 }

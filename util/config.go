@@ -28,16 +28,13 @@ import (
 	"fmt"
 	"github.com/go-sql-driver/mysql"
 	"github.com/pingcap/errors"
+	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 	"sync"
 	"time"
 )
 
-const (
-	RunText = iota
-	RunDir
-	RunOnline
-)
+
 
 type Config struct {
 	Dsn                string
@@ -52,7 +49,7 @@ type Config struct {
 	SrcPort            uint16
 	RunType            uint16
 	MySQLConfig        *mysql.Config
-	BeginReplaySQLTime time.Time
+	BeginReplaySQLTime int64
 	BeginReplaySQL     bool
 	BeginTimes         string
 	Mu  			   sync.RWMutex
@@ -160,79 +157,79 @@ func (cfg *Config) TryConnectDstDB() error {
 	return nil
 }
 
-func parseDateTime(b []byte, loc *time.Location) (time.Time, error) {
+func parseDateTime(b []byte, loc *time.Location) (int64, error) {
 	const base = "0000-00-00 00:00:00.000"
 	// up to "YYYY-MM-DD HH:MM:SS.MMMMMM"
 	if string(b) == base[:len(b)] {
-		return time.Time{}, errors.New(string(b)+" time is zero ,YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0, errors.New(string(b)+" time is zero ,YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 
 	year, err := parseByteYear(b)
 	if err != nil  {
-		return time.Time{}, err
+		return 0, err
 	}
 	if year <= 0 {
-		return time.Time{},errors.New(string(b)+" year is invalid,YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0,errors.New(string(b)+" year is invalid,YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 
 	if b[4] != '-' {
-		return time.Time{}, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 
 	m, err := parseByte2Digits(b[5], b[6])
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
 	if m <= 0 {
-		return time.Time{},errors.New(string(b)+" month is invalid,YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0,errors.New(string(b)+" month is invalid,YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 	month := time.Month(m)
 
 	if b[7] != '-' {
-		return time.Time{}, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 
 	day, err := parseByte2Digits(b[8], b[9])
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
 	if day <= 0 {
-		return time.Time{},errors.New(string(b)+" day is invalid,YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0,errors.New(string(b)+" day is invalid,YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 
 	if b[10] != ' ' {
-		return time.Time{}, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 
 	hour, err := parseByte2Digits(b[11], b[12])
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
 	if b[13] != ':' {
-		return time.Time{}, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 
 	min, err := parseByte2Digits(b[14], b[15])
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
 	if b[16] != ':' {
-		return time.Time{}, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 
 	sec, err := parseByte2Digits(b[17], b[18])
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
 
 	if b[19] != '.' {
-		return time.Time{}, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
+		return 0, fmt.Errorf(string(b)+ " time is not like YYYY-MM-DD HH:MM:SS.MMMMMM")
 	}
 	nsec, err := parseByteNanoSec(b[20:])
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
-	return time.Date(year, month, day, hour, min, sec, nsec, loc), nil
+	return time.Date(year, month, day, hour, min, sec, nsec, loc).Unix(), nil
 
 }
 
@@ -296,7 +293,7 @@ func (cfg *Config) ParseDateTime() error {
 func (cfg *Config) CheckBeginTime() error {
 	var err error
 	if len(cfg.BeginTimes) == 0 {
-		cfg.BeginReplaySQLTime = time.Time{}
+		cfg.BeginReplaySQLTime = 0
 		return nil
 	}
 
@@ -313,7 +310,7 @@ func (cfg *Config) GetBeginReplaySQL()bool{
 	defer cfg.Mu.RUnlock()
 	return cfg.BeginReplaySQL
 }
-func (cfg *Config) GetBeginReplaySQLTime()time.Time{
+func (cfg *Config) GetBeginReplaySQLTime()int64{
 	cfg.Mu.RLock()
 	defer cfg.Mu.RUnlock()
 	return cfg.BeginReplaySQLTime
@@ -325,31 +322,60 @@ func (cfg *Config) SetBeginReplaySQL(needReplay bool){
 	cfg.BeginReplaySQL=needReplay
 }
 
-const (
-	NotWriteLog uint16 = iota
-	NeedWriteLog
-	NeedReplaySQL
-)
 
-func (cfg *Config) CheckNeedReplay(ts time.Time) uint16 {
+
+func (cfg *Config) CheckNeedReplay(ts int64) uint16 {
 
 	if cfg.GetBeginReplaySQL()==true {
 		return NeedReplaySQL
 	}
 
 	beginTs := cfg.GetBeginReplaySQLTime()
-	if beginTs.Equal(time.Time{}){
+	if beginTs==0{
 		cfg.SetBeginReplaySQL(true)
 		return NeedReplaySQL
 	}
 
-	subTime := ts.Sub(cfg.BeginReplaySQLTime).Microseconds()
-	if subTime >= -100 && subTime <=100 {
+	if ts - beginTs >= -100000 && ts-beginTs <=0 {
 		return NeedWriteLog
-	}else if subTime < -100 {
+	}else if ts - beginTs < -100000 {
 		return NotWriteLog
 	} else {
 		cfg.SetBeginReplaySQL(true)
 		return NeedReplaySQL
 	}
+
+}
+
+func (cfg *Config)ParseFlagForRunDir(flags *pflag.FlagSet){
+	flags.StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
+	flags.Uint32VarP(&cfg.RunTime, "runtime", "t", 10, "replay server run time")
+	flags.StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set ")
+	flags.StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
+	flags.Uint64VarP(&cfg.PreFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
+	flags.Uint16VarP(&cfg.ListenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
+	flags.StringVarP(&cfg.DataDir, "data-dir", "D", "./data", "directory used to read pcap file")
+	flags.DurationVar(&cfg.FlushInterval, "flush-interval", time.Minute*3, "flush interval")
+	flags.StringVarP(&cfg.BeginTimes, "begin-time", "T", "","time to replay sql ")
+
+}
+
+func (cfg *Config)ParseFlagForRunText(flags *pflag.FlagSet){
+	flags.StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
+	flags.StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set")
+	flags.StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
+	flags.DurationVar(&cfg.FlushInterval, "flush-interval", time.Minute, "flush interval")
+	flags.Uint64VarP(&cfg.PreFileSize,"filesize","s",UINT64MAX,"Baseline size per document , unit M")
+	flags.Uint16VarP(&cfg.ListenPort, "listen-port", "P", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
+}
+
+func (cfg *Config)ParseFlagForRunOnline(flags *pflag.FlagSet){
+	flags.StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
+	flags.Uint32VarP(&cfg.RunTime, "runtime", "t", 0, "replay server run time")
+	flags.StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set ")
+	flags.StringVarP(&cfg.DeviceName, "device", "D", "eth0", "device name")
+	flags.StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
+	flags.Uint16VarP(&cfg.SrcPort, "srcPort", "P", 4000, "server port")
+	flags.Uint64VarP(&cfg.PreFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
+	flags.Uint16VarP(&cfg.ListenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
 }

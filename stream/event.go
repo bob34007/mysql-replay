@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/bobguo/mysql-replay/stats"
+	"github.com/bobguo/mysql-replay/util"
 	"strconv"
 	"strings"
 
@@ -12,14 +13,7 @@ import (
 	"github.com/google/gopacket/reassembly"
 )
 
-const (
-	EventHandshake uint64 = iota
-	EventQuit
-	EventQuery
-	EventStmtPrepare
-	EventStmtExecute
-	EventStmtClose
-)
+
 
 type MySQLEvent struct {
 	Time   int64         `json:"time"`
@@ -60,17 +54,17 @@ func (event *MySQLEvent)NewReplayRes(){
 
 func (event *MySQLEvent) String() string {
 	switch event.Type {
-	case EventQuery:
+	case util.EventQuery:
 		return fmt.Sprintf("execute {query:%q} @ %d", formatQuery(event.Query), event.Time)
-	case EventStmtExecute:
+	case util.EventStmtExecute:
 		return fmt.Sprintf("execute stmt {id:%d,params:%v} @%d", event.StmtID, event.Params, event.Time)
-	case EventStmtPrepare:
+	case util.EventStmtPrepare:
 		return fmt.Sprintf("prepare stmt {id:%d,query:%q} @%d", event.StmtID, formatQuery(event.Query), event.Time)
-	case EventStmtClose:
+	case util.EventStmtClose:
 		return fmt.Sprintf("close stmt {id:%d} @%d", event.StmtID, event.Time)
-	case EventHandshake:
+	case util.EventHandshake:
 		return fmt.Sprintf("connect {db:%q} @%d", event.DB, event.Time)
-	case EventQuit:
+	case util.EventQuit:
 		return fmt.Sprintf("quit @%d", event.Time)
 	default:
 		return fmt.Sprintf("unknown event {type:%v} @%d", event.Type, event.Time)
@@ -103,10 +97,10 @@ func AppendEvent(buf []byte, event MySQLEvent) ([]byte, error) {
 	buf = append(buf, sep)
 	buf = strconv.AppendUint(buf, event.Type, 10)
 	switch event.Type {
-	case EventQuery:
+	case util.EventQuery:
 		buf = append(buf, sep)
 		buf = strconv.AppendQuote(buf, event.Query)
-	case EventStmtExecute:
+	case util.EventStmtExecute:
 		buf = append(buf, sep)
 		buf = strconv.AppendUint(buf, event.StmtID, 10)
 		buf = append(buf, sep)
@@ -114,18 +108,18 @@ func AppendEvent(buf []byte, event MySQLEvent) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-	case EventStmtPrepare:
+	case util.EventStmtPrepare:
 		buf = append(buf, sep)
 		buf = strconv.AppendUint(buf, event.StmtID, 10)
 		buf = append(buf, sep)
 		buf = strconv.AppendQuote(buf, event.Query)
-	case EventStmtClose:
+	case util.EventStmtClose:
 		buf = append(buf, sep)
 		buf = strconv.AppendUint(buf, event.StmtID, 10)
-	case EventHandshake:
+	case util.EventHandshake:
 		buf = append(buf, sep)
 		buf = strconv.AppendQuote(buf, event.DB)
-	case EventQuit:
+	case util.EventQuit:
 	default:
 		return nil, fmt.Errorf("unknown event type: %v", event.Type)
 	}
@@ -202,7 +196,7 @@ func ScanEvent(s string, pos int, event *MySQLEvent) (int, error) {
 	pos = posNext + 1
 
 	switch event.Type {
-	case EventQuery:
+	case util.EventQuery:
 		// query
 		if len(s) < pos+1 {
 			return pos, fmt.Errorf("scan query of event from an empty string")
@@ -213,7 +207,7 @@ func ScanEvent(s string, pos int, event *MySQLEvent) (int, error) {
 			return pos, fmt.Errorf("scan query of event from (%s): %v", s[pos:posNext], err)
 		}
 		return posNext, nil
-	case EventStmtExecute:
+	case util.EventStmtExecute:
 		// stmt-id
 		if len(s) < pos+1 {
 			return pos, fmt.Errorf("scan stmt-id of event from an empty string")
@@ -230,7 +224,7 @@ func ScanEvent(s string, pos int, event *MySQLEvent) (int, error) {
 			return pos, fmt.Errorf("scan params of event from (%s): %v", s[pos:posNext], err)
 		}
 		return posNext, nil
-	case EventStmtPrepare:
+	case util.EventStmtPrepare:
 		// stmt-id
 		if len(s) < pos+1 {
 			return pos, fmt.Errorf("scan stmt-id of event from an empty string")
@@ -251,7 +245,7 @@ func ScanEvent(s string, pos int, event *MySQLEvent) (int, error) {
 			return pos, fmt.Errorf("scan query of event from (%s): %v", s[pos:posNext], err)
 		}
 		return posNext, nil
-	case EventStmtClose:
+	case util.EventStmtClose:
 		// stmt-id
 		if len(s) < pos+1 {
 			return pos, fmt.Errorf("scan stmt-id of event from an empty string")
@@ -262,7 +256,7 @@ func ScanEvent(s string, pos int, event *MySQLEvent) (int, error) {
 			return pos, fmt.Errorf("scan stmt-id of event from (%s): %v", s[pos:posNext], err)
 		}
 		return posNext, nil
-	case EventHandshake:
+	case util.EventHandshake:
 		// db
 		if len(s) < pos+1 {
 			return pos, fmt.Errorf("scan db of event from an empty string")
@@ -273,7 +267,7 @@ func ScanEvent(s string, pos int, event *MySQLEvent) (int, error) {
 			return pos, fmt.Errorf("scan db of event from (%s): %v", s[pos:posNext], err)
 		}
 		return posNext, nil
-	case EventQuit:
+	case util.EventQuit:
 		return posNext, nil
 	default:
 		return pos, fmt.Errorf("unknown event type: %v", event.Type)
@@ -402,33 +396,33 @@ func (h *eventHandler)ParsePacket(pkt MySQLPacket) *MySQLEvent{
 	e := &MySQLEvent{Time: pkt.Time.UnixNano()}
 	e.Fsm = h.fsm
 	switch h.fsm.State() {
-	case StateComQuery2:
-		e.Type = EventQuery
+	case util.StateComQuery2:
+		e.Type = util.EventQuery
 		e.Query = h.fsm.Query()
 
-	case StateComStmtExecute2:
+	case util.StateComStmtExecute2:
 		stmt := h.fsm.Stmt()
-		e.Type = EventStmtExecute
+		e.Type = util.EventStmtExecute
 		e.StmtID = uint64(stmt.ID)
 		e.Params = h.fsm.StmtParams()
 
-	case StateComStmtPrepare1:
+	case util.StateComStmtPrepare1:
 		stmt := h.fsm.Stmt()
-		e.Type = EventStmtPrepare
+		e.Type = util.EventStmtPrepare
 		e.StmtID = uint64(stmt.ID)
 		e.Query = stmt.Query
 
-	case StateComStmtClose:
+	case util.StateComStmtClose:
 		stmt := h.fsm.Stmt()
-		e.Type = EventStmtClose
+		e.Type = util.EventStmtClose
 		e.StmtID = uint64(stmt.ID)
 
-	case StateHandshake1:
-		e.Type = EventHandshake
+	case util.StateHandshake1:
+		e.Type = util.EventHandshake
 		e.DB = h.fsm.Schema()
 
-	case StateComQuit:
-		e.Type = EventQuit
+	case util.StateComQuit:
+		e.Type = util.EventQuit
 	default:
 		return nil
 	}

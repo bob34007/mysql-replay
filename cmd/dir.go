@@ -26,7 +26,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/bobguo/mysql-replay/replay"
+	"github.com/bobguo/mysql-replay/sqlreplay"
 	"github.com/bobguo/mysql-replay/stats"
 	"github.com/bobguo/mysql-replay/stream"
 	"github.com/bobguo/mysql-replay/util"
@@ -80,7 +80,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 				return nil
 			}
 
-			go printTime(cfg.Log)
+			go printTime()
 
 			ctx, cancel := context.WithCancel(context.Background())
 			go util.WatchDirCreateFile(ctx, cfg.DataDir, files, mu, cfg.Log)
@@ -91,7 +91,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 				logger := conn.Logger("replay")
-				return replay.NewReplayEventHandler(conn, logger, cfg)
+				return sqlreplay.NewReplayEventHandler(conn, logger, cfg)
 			}, options)
 
 			pool := reassembly.NewStreamPool(factory)
@@ -151,15 +151,8 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
+
+	cfg.ParseFlagForRunDir(cmd.Flags())
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
-	cmd.Flags().Uint32VarP(&cfg.RunTime, "runtime", "t", 10, "replay server run time")
-	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set ")
-	cmd.Flags().StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
-	cmd.Flags().Uint64VarP(&cfg.PreFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
-	cmd.Flags().Uint16VarP(&cfg.ListenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
-	cmd.Flags().StringVarP(&cfg.DataDir, "data-dir", "D", "./data", "directory used to read pcap file")
-	cmd.Flags().DurationVar(&cfg.FlushInterval, "flush-interval", time.Minute*3, "flush interval")
-	cmd.Flags().StringVarP(&cfg.BeginTimes, "begin-time", "T", "","time to replay sql ")
 	return cmd
 }

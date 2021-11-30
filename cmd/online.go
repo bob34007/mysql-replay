@@ -25,7 +25,7 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/bobguo/mysql-replay/replay"
+	"github.com/bobguo/mysql-replay/sqlreplay"
 	"github.com/bobguo/mysql-replay/stream"
 	"github.com/bobguo/mysql-replay/util"
 	"github.com/google/gopacket"
@@ -82,7 +82,7 @@ func trafficCapture(cfg *util.Config,options stream.FactoryOptions) error {
 	// Process packet here
 	factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 		logger := conn.Logger("replay")
-		return replay.NewReplayEventHandler(conn, logger, cfg)
+		return sqlreplay.NewReplayEventHandler(conn, logger, cfg)
 	}, options)
 
 	pool := reassembly.NewStreamPool(factory)
@@ -157,7 +157,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 				return nil
 			}
 
-			go printTime(cfg.Log)
+			go printTime()
 			go AddPortListenAndServer(cfg.ListenPort, cfg.OutputDir, cfg.StoreDir)
 			//handle online packet
 			err = trafficCapture(cfg,options)
@@ -172,15 +172,7 @@ func NewOnlineReplayCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
+	cfg.ParseFlagForRunOnline(cmd.Flags())
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
-	cmd.Flags().Uint32VarP(&cfg.RunTime, "runtime", "t", 0, "replay server run time")
-	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set ")
-	//cmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Minute*10, "flush interval")
-	cmd.Flags().StringVarP(&cfg.DeviceName, "device", "D", "eth0", "device name")
-	cmd.Flags().StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
-	cmd.Flags().Uint16VarP(&cfg.SrcPort, "srcPort", "P", 4000, "server port")
-	cmd.Flags().Uint64VarP(&cfg.PreFileSize, "filesize", "s", UINT64MAX, "Baseline size per document ,uint M")
-	cmd.Flags().Uint16VarP(&cfg.ListenPort, "listen-port", "p", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
 	return cmd
 }

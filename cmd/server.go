@@ -64,7 +64,10 @@ type QueryStats struct {
 	WriteRes  uint64 `json:"write_res"`
 	PacketChanLen uint64 `json:"packet_chan_len"`
 	SQLChanLen uint64 `json:"sql_chan_len"`
-	WritResChanLen uint64 `json:"writ_res_chan_len"`
+	WriteResChanLen uint64 `json:"write_res_chan_len"`
+	ExecSQLFail  uint64 `json:"exec_sql_fail"`
+	WriteResFileFail uint64 `json:"write_res_file_fail"`
+	FormatJsonFail uint64 `json:"format_json_fail"`
 }
 
 
@@ -77,7 +80,10 @@ func getStatic(qs *QueryStats){
 	qs.WriteRes = stats.GetValue("WriteRes")
 	qs.PacketChanLen=stats.GetValue("PacketChanLen")
 	qs.SQLChanLen = stats.GetValue("SQLChanLen")
-	qs.WritResChanLen=stats.GetValue("WritResChanLen")
+	qs.WriteResChanLen=stats.GetValue("WriteResChanLen")
+	qs.ExecSQLFail =stats.GetValue("ExecSQLFail")
+	qs.WriteResFileFail =stats.GetValue("WriteResFileFail")
+	qs.FormatJsonFail =stats.GetValue("FormatJsonFail")
 }
 
 func HandleQueryStats(w http.ResponseWriter, r *http.Request) {

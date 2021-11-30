@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/binary"
 	"fmt"
+	"github.com/bobguo/mysql-replay/util"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket/reassembly"
 	"github.com/pingcap/errors"
@@ -16,55 +17,39 @@ import (
 
 
 
-const (
-	StateInit = iota
-	StateUnknown
-	StateComQuery
-	StateComStmtExecute
-	StateComStmtClose
-	StateComStmtPrepare0
-	StateComStmtPrepare1
-	StateComQuit
-	StateHandshake0
-	StateHandshake1
-	StateComQuery1
-	StateComQuery2
-	StateComStmtExecute1
-	StateComStmtExecute2
-	StateSkipPacket
-)
+
 
 func StateName(state int) string {
 	switch state {
-	case StateInit:
+	case util.StateInit:
 		return "Init"
-	case StateUnknown:
+	case util.StateUnknown:
 		return "Unknown"
-	case StateComQuery:
+	case util.StateComQuery:
 		return "ComQuery"
-	case StateComQuery1:
+	case util.StateComQuery1:
 		return "ReadingComQueryRes"
-	case StateComQuery2:
+	case util.StateComQuery2:
 		return "ReadComQueryResEnd"
-	case StateComStmtExecute:
+	case util.StateComStmtExecute:
 		return "ComStmtExecute"
-	case StateComStmtExecute1:
+	case util.StateComStmtExecute1:
 		return "ReadingComStmtExecuteRes"
-	case StateComStmtExecute2:
+	case util.StateComStmtExecute2:
 		return "ReadingComStmtExecuteEnd"
-	case StateComStmtClose:
+	case util.StateComStmtClose:
 		return "ComStmtClose"
-	case StateComStmtPrepare0:
+	case util.StateComStmtPrepare0:
 		return "ComStmtPrepare0"
-	case StateComStmtPrepare1:
+	case util.StateComStmtPrepare1:
 		return "ComStmtPrepare1"
-	case StateComQuit:
+	case util.StateComQuit:
 		return "ComQuit"
-	case StateHandshake0:
+	case util.StateHandshake0:
 		return "Handshake0"
-	case StateHandshake1:
+	case util.StateHandshake1:
 		return "Handshake1"
-	case StateSkipPacket:
+	case util.StateSkipPacket:
 		return "StateSkipPacket"
 	default:
 		return "Invalid"
@@ -83,7 +68,7 @@ func NewMySQLFSM(log *zap.Logger) *MySQLFSM {
 
 	return &MySQLFSM{
 		log:     log,
-		state:   StateInit,
+		state:   util.StateInit,
 		data:    new(bytes.Buffer),
 		stmts:   map[uint32]Stmt{},
 		params:  []interface{}{},
@@ -215,7 +200,7 @@ func (fsm *MySQLFSM) Ready() bool {
 //When a message packet with sequence number 0 is received,
 //initialize some variables
 func (fsm *MySQLFSM) InitValue() {
-	fsm.set(StateInit, "recv packet with seq(0)")
+	fsm.set(util.StateInit, "recv packet with seq(0)")
 	pr := new(PacketRes)
 	fsm.pr = pr
 	pr.readColEnd = false
@@ -232,14 +217,14 @@ func (fsm *MySQLFSM) InitValue() {
 
 func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 	fsm.changed = false
-	if fsm.state == StateComQuit {
+	if fsm.state == util.StateComQuit {
 		return
 	}
 	//Message sequence numbers may reuse
 	//serial number 0 for large result sets
 	if pkt.Seq == 0 &&
-		fsm.State() != StateComQuery1 &&
-		fsm.State() != StateComStmtExecute1 {
+		fsm.State() != util.StateComQuery1 &&
+		fsm.State() != util.StateComStmtExecute1 {
 		fsm.InitValue()
 		fsm.pr.sqlBeginTime = uint64(pkt.Time.UnixNano())
 		fsm.log.Debug("sql begin time is :" + fmt.Sprintf("%v", fsm.pr.sqlBeginTime))
@@ -248,7 +233,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		fsm.packets = append(fsm.packets, pkt)
 	} else {
 		stateChgBefore := StateName(fsm.State())
-		fsm.setStatusWithNoChange(StateSkipPacket)
+		fsm.setStatusWithNoChange(util.StateSkipPacket)
 		//fsm.setStatusWithNoChange(StateInit)
 		stateChgAfter := StateName(fsm.State())
 		fsm.log.Debug("pkt seq is not correct "+
@@ -261,15 +246,15 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 		return
 	}
 
-	if fsm.state == StateInit {
+	if fsm.state == util.StateInit {
 		fsm.handleInitPacket()
-	} else if fsm.state == StateComStmtPrepare0 {
+	} else if fsm.state == util.StateComStmtPrepare0 {
 		fsm.handleComStmtPrepareResponse()
-	} else if fsm.state == StateHandshake0 {
+	} else if fsm.state == util.StateHandshake0 {
 		fsm.handleHandshakeResponse()
-	} else if fsm.state == StateComQuery || fsm.state == StateComQuery1 {
-		if fsm.state == StateComQuery {
-			fsm.setStatusWithNoChange(StateComQuery1)
+	} else if fsm.state == util.StateComQuery || fsm.state == util.StateComQuery1 {
+		if fsm.state == util.StateComQuery {
+			fsm.setStatusWithNoChange(util.StateComQuery1)
 		}
 		err := fsm.handleReadSQLResult()
 		if err != nil {
@@ -282,15 +267,15 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			}
 		}
 		if fsm.pr.ifReadResEnd {
-			fsm.set(StateComQuery2)
+			fsm.set(util.StateComQuery2)
 			fsm.pr.sqlEndTime = uint64(pkt.Time.UnixNano())
 			fsm.log.Debug("the query exec time is :" +
 				fmt.Sprintf("%v", fsm.pr.sqlEndTime-fsm.pr.sqlBeginTime) +
 				"ms")
 		}
-	} else if fsm.state == StateComStmtExecute || fsm.state == StateComStmtExecute1 {
-		if fsm.state == StateComStmtExecute {
-			fsm.setStatusWithNoChange(StateComStmtExecute1)
+	} else if fsm.state == util.StateComStmtExecute || fsm.state == util.StateComStmtExecute1 {
+		if fsm.state == util.StateComStmtExecute {
+			fsm.setStatusWithNoChange(util.StateComStmtExecute1)
 		}
 
 		err := fsm.handleReadPrepareExecResult()
@@ -304,7 +289,7 @@ func (fsm *MySQLFSM) Handle(pkt MySQLPacket) {
 			}
 		}
 		if fsm.pr.ifReadResEnd {
-			fsm.set(StateComStmtExecute2)
+			fsm.set(util.StateComStmtExecute2)
 			fsm.pr.sqlEndTime = uint64(pkt.Time.UnixNano())
 			fsm.log.Debug("sql end time is :" + fmt.Sprintf("%v", fsm.pr.sqlEndTime))
 			fsm.log.Debug("the query exec time is :" +
@@ -374,24 +359,24 @@ func (fsm *MySQLFSM) set(to int, msg ...string) {
 	}
 	tmpl := "mysql fsm(%s->%s)"
 	query := fsm.query
-	if to != StateComQuery {
+	if to != util.StateComQuery {
 		query = fsm.stmt.Query
 	}
 	if n := len(query); n > 500 {
 		query = query[:300] + "..." + query[n-196:]
 	}
 	switch to {
-	case StateComQuery:
+	case util.StateComQuery:
 		tmpl += fmt.Sprintf("{query:%q}", query)
-	case StateComStmtExecute:
+	case util.StateComStmtExecute:
 		tmpl += fmt.Sprintf("{query:%q,id:%d,params:%v}", query, fsm.stmt.ID, fsm.params)
-	case StateComStmtPrepare0:
+	case util.StateComStmtPrepare0:
 		tmpl += fmt.Sprintf("{query:%q}", query)
-	case StateComStmtPrepare1:
+	case util.StateComStmtPrepare1:
 		tmpl += fmt.Sprintf("{query:%q,id:%d,num-params:%d}", query, fsm.stmt.ID, fsm.stmt.NumParams)
-	case StateComStmtClose:
+	case util.StateComStmtClose:
 		tmpl += fmt.Sprintf("{query:%q,id:%d,num-params:%d}", query, fsm.stmt.ID, fsm.stmt.NumParams)
-	case StateHandshake1:
+	case util.StateHandshake1:
 		tmpl += fmt.Sprintf("{schema:%q}", fsm.schema)
 	}
 	if len(msg) > 0 {
@@ -440,7 +425,7 @@ func (fsm *MySQLFSM) isHandshakeRequest() bool {
 
 func (fsm *MySQLFSM) handleInitPacket() {
 	if !fsm.load(0) {
-		fsm.set(StateUnknown, "init: cannot load packet")
+		fsm.set(util.StateUnknown, "init: cannot load packet")
 		fsm.log.Warn("init :load packet fail")
 		return
 	}
@@ -454,14 +439,14 @@ func (fsm *MySQLFSM) handleInitPacket() {
 	} else if fsm.isClientCommand(comStmtClose) {
 		fsm.handleComStmtCloseNoLoad()
 	} else if fsm.isClientCommand(comQuit) {
-		fsm.set(StateComQuit)
+		fsm.set(util.StateComQuit)
 	} else if fsm.isHandshakeRequest() {
-		fsm.set(StateHandshake0)
+		fsm.set(util.StateHandshake0)
 	} else {
 		if fsm.assertDir(reassembly.TCPDirClientToServer) && fsm.data.Len() > 0 {
-			fsm.set(StateUnknown, fmt.Sprintf("init: skip client command(0x%02x)", fsm.data.Bytes()[0]))
+			fsm.set(util.StateUnknown, fmt.Sprintf("init: skip client command(0x%02x)", fsm.data.Bytes()[0]))
 		} else {
-			fsm.set(StateUnknown, "init: unsupported packet")
+			fsm.set(util.StateUnknown, "init: unsupported packet")
 			//The first character indicates the current command type
 			fsm.log.Warn("unsupported command :" + string(fsm.data.Bytes()[:1]))
 		}
@@ -470,7 +455,7 @@ func (fsm *MySQLFSM) handleInitPacket() {
 
 func (fsm *MySQLFSM) handleComQueryNoLoad() {
 	fsm.query = string(fsm.data.Bytes()[1:])
-	fsm.set(StateComQuery)
+	fsm.set(util.StateComQuery)
 }
 
 func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
@@ -482,7 +467,7 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 	)
 	data := fsm.data.Bytes()[1:]
 	if id, data, ok = readUint32(data); !ok {
-		fsm.set(StateUnknown, "stmt execute: cannot read stmt id")
+		fsm.set(util.StateUnknown, "stmt execute: cannot read stmt id")
 		var n int = 4
 		if len(data) < 4 {
 			n = len(data)
@@ -491,12 +476,12 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 		return
 	}
 	if stmt, ok = fsm.stmts[id]; !ok {
-		fsm.set(StateUnknown, "stmt execute: unknown stmt id")
+		fsm.set(util.StateUnknown, "stmt execute: unknown stmt id")
 		fsm.log.Info("unknown stmt id " + fmt.Sprintf("%v", id))
 		return
 	}
 	if _, data, ok = readBytesN(data, 5); !ok {
-		fsm.set(StateUnknown, "stmt execute: cannot read flag and iteration-count")
+		fsm.set(util.StateUnknown, "stmt execute: cannot read flag and iteration-count")
 		var n int = 5
 		if len(data) < 5 {
 			n = len(data)
@@ -512,7 +497,7 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 			err         error
 		)
 		if nullBitmaps, data, ok = readBytesN(data, (stmt.NumParams+7)>>3); !ok {
-			fsm.set(StateUnknown, "stmt execute: cannot read null-bitmap")
+			fsm.set(util.StateUnknown, "stmt execute: cannot read null-bitmap")
 			var n int = stmt.NumParams + 7>>3
 			if len(data) < (stmt.NumParams + 7>>3) {
 				n = len(data)
@@ -521,7 +506,7 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 			return
 		}
 		if len(data) < 1+2*stmt.NumParams {
-			fsm.set(StateUnknown, "stmt execute: cannot read params")
+			fsm.set(util.StateUnknown, "stmt execute: cannot read params")
 			fsm.log.Warn("can not read params ,Package is not complete " +
 				fmt.Sprintf("%v-%v", len(data), 1+2*stmt.NumParams))
 			return
@@ -534,7 +519,7 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 			fsm.stmts[id] = stmt
 		} else {
 			if stmt.types == nil {
-				fsm.set(StateUnknown, "stmt execute: param types is missing")
+				fsm.set(util.StateUnknown, "stmt execute: param types is missing")
 				fsm.log.Warn("can get stmt param type ")
 				return
 			}
@@ -543,14 +528,14 @@ func (fsm *MySQLFSM) handleComStmtExecuteNoLoad() {
 		}
 		params, err = parseExecParams(stmt, nullBitmaps, paramTypes, paramValues)
 		if err != nil {
-			fsm.set(StateUnknown, "stmt execute: "+err.Error())
+			fsm.set(util.StateUnknown, "stmt execute: "+err.Error())
 			fsm.log.Warn("parse exec params fail " + err.Error())
 			return
 		}
 	}
 	fsm.stmt = stmt
 	fsm.params = params
-	fsm.set(StateComStmtExecute)
+	fsm.set(util.StateComStmtExecute)
 }
 
 func (fsm *MySQLFSM) IsSelectStmtOrSelectPrepare(query string) bool {
@@ -589,7 +574,7 @@ func (fsm *MySQLFSM) handleComStmtCloseNoLoad() {
 
 	stmtID, _, ok := readUint32(fsm.data.Bytes()[1:])
 	if !ok {
-		fsm.set(StateUnknown, "stmt close: cannot read stmt id")
+		fsm.set(util.StateUnknown, "stmt close: cannot read stmt id")
 		var n int = 4
 		if len(fsm.data.Bytes()[1:]) < 4 {
 			n = len(fsm.data.Bytes()[1:])
@@ -600,30 +585,30 @@ func (fsm *MySQLFSM) handleComStmtCloseNoLoad() {
 	}
 	fsm.stmt = fsm.stmts[stmtID]
 	delete(fsm.stmts, stmtID)
-	fsm.set(StateComStmtClose)
+	fsm.set(util.StateComStmtClose)
 }
 
 func (fsm *MySQLFSM) handleComStmtPrepareRequestNoLoad() {
 	fsm.stmt = Stmt{Query: string(fsm.data.Bytes()[1:])}
-	fsm.set(StateComStmtPrepare0)
+	fsm.set(util.StateComStmtPrepare0)
 }
 
 func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 	//handle prepare response
 
 	if !fsm.load(1) {
-		fsm.set(StateUnknown, "stmt prepare: cannot load packet")
+		fsm.set(util.StateUnknown, "stmt prepare: cannot load packet")
 		fsm.log.Warn("parse prepare reaponse fail , can not load packet " +
 			fmt.Sprintf("%v", len(fsm.packets)))
 		return
 	}
 	if !fsm.assertDir(reassembly.TCPDirServerToClient) {
-		fsm.set(StateUnknown, "stmt prepare: unexpected packet direction")
+		fsm.set(util.StateUnknown, "stmt prepare: unexpected packet direction")
 		fsm.log.Warn("parse prepare reaponse fail , unexpected packet direction")
 		return
 	}
 	if !fsm.assertDataByte(0, 0) {
-		fsm.set(StateUnknown, "stmt prepare: not ok")
+		fsm.set(util.StateUnknown, "stmt prepare: not ok")
 		fsm.log.Info("prepare fail on server ")
 		return
 	}
@@ -634,7 +619,7 @@ func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 	)
 	data := fsm.data.Bytes()[1:]
 	if stmtID, data, ok = readUint32(data); !ok {
-		fsm.set(StateUnknown, "stmt prepare: cannot read stmt id")
+		fsm.set(util.StateUnknown, "stmt prepare: cannot read stmt id")
 		var n int = 4
 		if len(data) < 4 {
 			n = len(data)
@@ -644,7 +629,7 @@ func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 		return
 	}
 	if _, data, ok = readUint16(data); !ok {
-		fsm.set(StateUnknown, "stmt prepare: cannot read number of columns")
+		fsm.set(util.StateUnknown, "stmt prepare: cannot read number of columns")
 		var n int = 2
 		if len(data) < 2 {
 			n = len(data)
@@ -654,7 +639,7 @@ func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 		return
 	}
 	if numParams, _, ok = readUint16(data); !ok {
-		fsm.set(StateUnknown, "stmt prepare: cannot read number of params")
+		fsm.set(util.StateUnknown, "stmt prepare: cannot read number of params")
 		var n int = 2
 		if len(data) < 2 {
 			n = len(data)
@@ -666,20 +651,20 @@ func (fsm *MySQLFSM) handleComStmtPrepareResponse() {
 	fsm.stmt.ID = stmtID
 	fsm.stmt.NumParams = int(numParams)
 	fsm.stmts[stmtID] = fsm.stmt
-	fsm.set(StateComStmtPrepare1)
+	fsm.set(util.StateComStmtPrepare1)
 }
 
 func (fsm *MySQLFSM) handleHandshakeResponse() {
 	//handle handshake response
 
 	if !fsm.load(1) {
-		fsm.set(StateUnknown, "handshake: cannot load packet")
+		fsm.set(util.StateUnknown, "handshake: cannot load packet")
 		fsm.log.Warn("parse prepare reaponse fail , can not load packet " +
 			fmt.Sprintf("%v", len(fsm.packets)))
 		return
 	}
 	if !fsm.assertDir(reassembly.TCPDirClientToServer) {
-		fsm.set(StateUnknown, "handshake: unexpected packet direction")
+		fsm.set(util.StateUnknown, "handshake: unexpected packet direction")
 		fsm.log.Warn("parse prepare reaponse fail , unexpected packet direction")
 		return
 	}
@@ -690,7 +675,7 @@ func (fsm *MySQLFSM) handleHandshakeResponse() {
 	)
 	data := fsm.data.Bytes()
 	if bs, data, ok = readBytesN(data, 2); !ok {
-		fsm.set(StateUnknown, "handshake: cannot read capability flags")
+		fsm.set(util.StateUnknown, "handshake: cannot read capability flags")
 		var n int = 2
 		if len(data) < 2 {
 			n = len(data)
@@ -702,7 +687,7 @@ func (fsm *MySQLFSM) handleHandshakeResponse() {
 	flags |= clientFlag(bs[1]) << 8
 	if flags&clientProtocol41 > 0 {
 		if bs, data, ok = readBytesN(data, 2); !ok {
-			fsm.set(StateUnknown, "handshake: cannot read extended capability flags")
+			fsm.set(util.StateUnknown, "handshake: cannot read extended capability flags")
 			var n int = 2
 			if len(data) < 2 {
 				n = len(data)
@@ -713,70 +698,70 @@ func (fsm *MySQLFSM) handleHandshakeResponse() {
 		flags |= clientFlag(bs[0]) << 16
 		flags |= clientFlag(bs[1]) << 24
 		if _, data, ok = readBytesN(data, 28); !ok {
-			fsm.set(StateUnknown, "handshake: cannot read max-packet size, character set and reserved")
+			fsm.set(util.StateUnknown, "handshake: cannot read max-packet size, character set and reserved")
 			return
 		}
 		if _, data, ok = readBytesNUL(data); !ok {
-			fsm.set(StateUnknown, "handshake: cannot read username")
+			fsm.set(util.StateUnknown, "handshake: cannot read username")
 			return
 		}
 		if flags&clientPluginAuthLenEncClientData > 0 {
 			var n uint64
 			if n, data, ok = readLenEncUint(data); !ok {
-				fsm.set(StateUnknown, "handshake: cannot read length of auth-response")
+				fsm.set(util.StateUnknown, "handshake: cannot read length of auth-response")
 				return
 			}
 			if _, data, ok = readBytesN(data, int(n)); !ok {
-				fsm.set(StateUnknown, "handshake: cannot read auth-response")
+				fsm.set(util.StateUnknown, "handshake: cannot read auth-response")
 				return
 			}
 		} else if flags&clientSecureConn > 0 {
 			var n []byte
 			if n, data, ok = readBytesN(data, 1); !ok {
-				fsm.set(StateUnknown, "handshake: cannot read length of auth-response")
+				fsm.set(util.StateUnknown, "handshake: cannot read length of auth-response")
 				return
 			}
 			if _, data, ok = readBytesN(data, int(n[0])); !ok {
-				fsm.set(StateUnknown, "handshake: cannot read auth-response")
+				fsm.set(util.StateUnknown, "handshake: cannot read auth-response")
 				return
 			}
 		} else {
 			if _, data, ok = readBytesNUL(data); !ok {
-				fsm.set(StateUnknown, "handshake: cannot read auth-response")
+				fsm.set(util.StateUnknown, "handshake: cannot read auth-response")
 				return
 			}
 		}
 		if flags&clientConnectWithDB > 0 {
 			var db []byte
 			if db, data, ok = readBytesNUL(data); !ok {
-				fsm.set(StateUnknown, "handshake: cannot read database")
+				fsm.set(util.StateUnknown, "handshake: cannot read database")
 				return
 			}
 			fsm.schema = string(db)
 		}
 	} else {
 		if _, data, ok = readBytesN(data, 3); !ok {
-			fsm.set(StateUnknown, "handshake: cannot read max-packet size")
+			fsm.set(util.StateUnknown, "handshake: cannot read max-packet size")
 			return
 		}
 		if _, data, ok = readBytesNUL(data); !ok {
-			fsm.set(StateUnknown, "handshake: cannot read username")
+			fsm.set(util.StateUnknown, "handshake: cannot read username")
 			return
 		}
 		if flags&clientConnectWithDB > 0 {
 			var db []byte
 			if _, data, ok = readBytesNUL(data); !ok {
-				fsm.set(StateUnknown, "handshake: cannot read auth-response")
+				fsm.set(util.StateUnknown, "handshake: cannot read auth-response")
 				return
 			}
 			if db, data, ok = readBytesNUL(data); !ok {
-				fsm.set(StateUnknown, "handshake: cannot read database")
+				fsm.set(util.StateUnknown, "handshake: cannot read database")
 				return
 			}
 			fsm.schema = string(db)
 		}
 	}
-	fsm.set(StateHandshake1)
+	fsm.set(util.StateHandshake1)
 }
 
 func parseExecParams(stmt Stmt, nullBitmap []byte, paramTypes []byte, paramValues []byte) (params []interface{}, err error) {

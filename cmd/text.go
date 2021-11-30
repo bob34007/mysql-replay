@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/bobguo/mysql-replay/replay"
+	"github.com/bobguo/mysql-replay/sqlreplay"
 	"github.com/bobguo/mysql-replay/stream"
 	"github.com/bobguo/mysql-replay/util"
 	"github.com/google/gopacket/reassembly"
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var UINT64MAX uint64= 1<<64 -1
+
 var ERRORTIMEOUT = errors.New("replay runtime out")
 
 
@@ -48,13 +48,13 @@ func NewTextDumpReplayCommand() *cobra.Command {
 				return nil
 			}
 
-			go printTime(log)
+			go printTime()
 			go AddPortListenAndServer(cfg.ListenPort,cfg.OutputDir, cfg.StoreDir)
 
 
 			factory := stream.NewFactoryFromEventHandler(func(conn stream.ConnID) stream.MySQLEventHandler {
 				logger := conn.Logger("replay")
-				return replay.NewReplayEventHandler(conn,logger,cfg)
+				return sqlreplay.NewReplayEventHandler(conn,logger,cfg)
 			}, options)
 			pool := reassembly.NewStreamPool(factory)
 			assembler := reassembly.NewAssembler(pool)
@@ -78,15 +78,8 @@ func NewTextDumpReplayCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&cfg.Dsn, "dsn", "d", "", "replay server dsn")
+	cfg.ParseFlagForRunText(cmd.Flags())
 	cmd.Flags().BoolVar(&options.ForceStart, "force-start", false, "accept streams even if no SYN have been seen")
-	//cmd.Flags().Uint32VarP(&cfg.RunTime, "runtime", "t", 0, "replay server run time")
-	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "./output", "directory used to write the result set")
-	cmd.Flags().StringVarP(&cfg.StoreDir, "storeDir", "S", "", "save result dir")
-	cmd.Flags().DurationVar(&cfg.FlushInterval, "flush-interval", time.Minute, "flush interval")
-	cmd.Flags().Uint64VarP(&cfg.PreFileSize,"filesize","s",UINT64MAX,"Baseline size per document , unit M")
-	cmd.Flags().Uint16VarP(&cfg.ListenPort, "listen-port", "P", 7002, "http server port , Provide query statistical (query) information and exit (exit) services")
-
 	return cmd
 }
 

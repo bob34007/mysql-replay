@@ -31,7 +31,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 )
 
 func Test_tryConnectDstDB(t *testing.T) {
@@ -177,6 +179,13 @@ func Test_CheckOutputDir_check_succ(t *testing.T){
 	assert.New(t).Nil(err)
 }
 
+func Test_CheckParamValid_CheckBeginTime_err(t *testing.T){
+	cfg:=&Config{
+		BeginTimes: "2021",
+	}
+	err:=cfg.CheckParamValid()
+	assert.New(t).NotNil(err)
+}
 
 func Test_CheckParamValid_CheckOutputDir_fail(t *testing.T){
 	cfg:=&Config{
@@ -343,4 +352,352 @@ func Test_CheckParamValid_TryConnectDstDB_succ(t *testing.T){
 
 	assert.New(t).Nil(err1)
 
+}
+
+func Test_CheckBeginTime_len_zero (t *testing.T){
+	cfg :=&Config{
+		BeginTimes: "",
+	}
+	err := cfg.CheckBeginTime()
+	assert.New(t).Nil(err)
+}
+
+func Test_CheckBeginTime_err (t *testing.T){
+	cfg :=&Config{
+		BeginTimes: "2021",
+	}
+	err := cfg.CheckBeginTime()
+	assert.New(t).NotNil(err)
+}
+
+func Test_CheckBeginTime_succ (t *testing.T){
+	cfg :=&Config{
+		BeginTimes: "2021-11-29 20:49:10.999",
+	}
+	err := cfg.CheckBeginTime()
+	assert.New(t).Nil(err)
+}
+
+func Test_GetBeginReplaySQL(t *testing.T){
+	cfg:=&Config{
+		BeginReplaySQL: false,
+	}
+	b := cfg.GetBeginReplaySQL()
+	assert.New(t).False(b)
+}
+
+func Test_GetBeginReplaySQLTime(t *testing.T){
+	ts := time.Now()
+	cfg:=&Config{
+		BeginReplaySQLTime: ts,
+	}
+	ts1:=cfg.GetBeginReplaySQLTime()
+
+	assert.New(t).Equal(ts,ts1)
+}
+
+func Test_SetBeginReplaySQL (t *testing.T){
+	cfg:=&Config{}
+	cfg.SetBeginReplaySQL(true)
+	assert.New(t).True(cfg.BeginReplaySQL)
+}
+
+func TestConfig_CheckNeedReplay(t *testing.T) {
+	ts := time.Now()
+	type fields struct {
+		Dsn                string
+		RunTime            uint32
+		OutputDir          string
+		PreFileSize        uint64
+		StoreDir           string
+		ListenPort         uint16
+		DataDir            string
+		FlushInterval      time.Duration
+		DeviceName         string
+		SrcPort            uint16
+		RunType            uint16
+		MySQLConfig        *mysql.Config
+		BeginReplaySQLTime time.Time
+		BeginReplaySQL     bool
+		BeginTimes         string
+		Mu                 sync.RWMutex
+		Log                *zap.Logger
+	}
+	type args struct {
+		ts time.Time
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   uint16
+	}{
+		{
+			name :"NeedReplaySQL",
+			fields:fields{
+				BeginReplaySQL:true,
+			},
+			args:args{
+				ts:time.Now(),
+			},
+			want:NeedReplaySQL,
+		},
+		{
+			name :"NeedReplaySQL",
+			fields:fields{
+				BeginReplaySQL:false,
+				BeginReplaySQLTime:time.Time{},
+			},
+			args:args{
+				ts:time.Now(),
+			},
+			want:NeedReplaySQL,
+		},
+		{
+			name :"NotWriteLog",
+			fields:fields{
+				BeginReplaySQL:false,
+				BeginReplaySQLTime:ts,
+			},
+			args:args{
+				ts:ts.Add(-150 *time.Millisecond),
+			},
+			want:NotWriteLog,
+		},
+		{
+			name :"NeedWriteLog",
+			fields:fields{
+				BeginReplaySQL:false,
+				BeginReplaySQLTime:ts,
+			},
+			args:args{
+				ts:ts.Add(-50 *time.Millisecond),
+			},
+			want:NotWriteLog,
+		},
+		{
+			name :"NeedReplaySQL",
+			fields:fields{
+				BeginReplaySQL:false,
+				BeginReplaySQLTime:ts,
+			},
+			args:args{
+				ts:ts.Add(150 *time.Millisecond),
+			},
+			want:NeedReplaySQL,
+		},
+	}
+		for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Dsn:                tt.fields.Dsn,
+				RunTime:            tt.fields.RunTime,
+				OutputDir:          tt.fields.OutputDir,
+				PreFileSize:        tt.fields.PreFileSize,
+				StoreDir:           tt.fields.StoreDir,
+				ListenPort:         tt.fields.ListenPort,
+				DataDir:            tt.fields.DataDir,
+				FlushInterval:      tt.fields.FlushInterval,
+				DeviceName:         tt.fields.DeviceName,
+				SrcPort:            tt.fields.SrcPort,
+				RunType:            tt.fields.RunType,
+				MySQLConfig:        tt.fields.MySQLConfig,
+				BeginReplaySQLTime: tt.fields.BeginReplaySQLTime,
+				BeginReplaySQL:     tt.fields.BeginReplaySQL,
+				BeginTimes:         tt.fields.BeginTimes,
+				Mu:                 tt.fields.Mu,
+				Log:                tt.fields.Log,
+			}
+			if got := cfg.CheckNeedReplay(tt.args.ts); got != tt.want {
+				t.Errorf("CheckNeedReplay() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_ParseDateTime_err (t *testing.T){
+	cfg:=&Config{
+		BeginTimes: "2021",
+	}
+	err := cfg.ParseDateTime()
+	assert.New(t).NotNil(err)
+}
+func Test_ParseDateTime_succ (t *testing.T){
+	cfg:=&Config{
+		BeginTimes: "2021-11-29 21:00:00.100",
+	}
+	err := cfg.ParseDateTime()
+	assert.New(t).Nil(err)
+}
+
+func Test_bToi_err (t *testing.T){
+	_,err := bToi('A')
+	assert.New(t).NotNil(err)
+}
+
+func Test_bToi_succ (t *testing.T){
+	i,err := bToi('3')
+	assert.New(t).Nil(err)
+	assert.New(t).Equal(i,3)
+}
+
+func Test_parseByteNanoSec_err(t *testing.T){
+	b := []byte{'1','A','3'}
+
+	_,err:=parseByteNanoSec(b)
+
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseByteNanoSec_succ(t *testing.T){
+	b := []byte{'1','2','3'}
+
+	i,err:=parseByteNanoSec(b)
+
+	assert.New(t).Nil(err)
+	assert.New(t).Equal(i,123000000)
+}
+
+func Test_parseByte2Digits_b1_err (t *testing.T){
+	b1 :=byte('c')
+	b2 :=byte('1')
+	_,err:=parseByte2Digits(b1,b2)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseByte2Digits_b2_err (t *testing.T){
+	b1 :=byte('1')
+	b2 :=byte('c')
+	_,err:=parseByte2Digits(b1,b2)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseByte2Digits_succ ( t *testing.T){
+	b1 := byte('1')
+	b2 := byte('1')
+	i,err:=parseByte2Digits(b1,b2)
+	assert.New(t).Equal(i,11)
+	assert.New(t).Nil(err)
+}
+
+func Test_parseByteYear_err (t *testing.T){
+	b := []byte("2A21")
+	_,err:=parseByteYear(b)
+	assert.New(t).NotNil(err)
+
+}
+
+func Test_parseByteYear_succ (t *testing.T){
+	b :=[]byte("2021")
+	year,err:=parseByteYear(b)
+	assert.New(t).Equal(year,2021)
+	assert.New(t).Nil(err)
+}
+
+func Test_parseDateTime_zero(t *testing.T) {
+	b := []byte("0000-00-00 00:00:00.000")
+	_,err:=parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_parseByteYear_err (t *testing.T){
+	b := []byte("20A1-00-00 00:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_parseByteYear_lt_zero (t *testing.T){
+	b := []byte("0000-12-00 00:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_parseByteYear_b4_err (t *testing.T){
+	b := []byte("202112-0000:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_parseMon_err (t *testing.T){
+	b := []byte("2021-A2-0000:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_parseMon_zero (t *testing.T){
+	b := []byte("2021-00-0000:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_b7_err(t *testing.T){
+	b := []byte("2021-010000:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_parseDay_err (t *testing.T){
+	b := []byte("2021-11-AA 00:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_parseDay_zero (t *testing.T){
+	b := []byte("2021-11-00 00:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+
+func Test_parseDateTime_b10_err (t *testing.T){
+	b := []byte("2021-11-0000:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_hour_err (t *testing.T){
+	b := []byte("2021-11-01 AA:00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_b13_err (t *testing.T){
+	b := []byte("2021-11-01 AA00:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_min_err (t *testing.T){
+	b := []byte("2021-11-01 11:AA:00.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_b16_err (t *testing.T){
+	b := []byte("2021-11-01 11:1100.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+func Test_parseDateTime_sec_err (t *testing.T){
+	b := []byte("2021-11-01 11:01:AA.000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_b19_err (t *testing.T){
+	b := []byte("2021-11-01 11:11:00000")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_nanosec_err (t *testing.T){
+	b := []byte("2021-11-01 11:11:00.A00")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).NotNil(err)
+}
+
+func Test_parseDateTime_succ (t *testing.T){
+	b := []byte("2021-11-01 11:11:00.100")
+	_,err := parseDateTime(b,time.UTC)
+	assert.New(t).Nil(err)
 }

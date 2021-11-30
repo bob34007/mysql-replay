@@ -43,7 +43,10 @@ func init(){
 	Static["WriteRes"]=0
 	Static["PacketChanLen"]=0
 	Static["SQLChanLen"]=0
-	Static["WritResChanLen"]=0
+	Static["WriteResChanLen"]=0
+	Static["ExecSQLFail"]=0
+	Static["WriteResFileFail"]=0
+	Static["FormatJsonFail"]=0
 }
 
 func AddStatic(key string , value uint64, replace bool){
@@ -63,7 +66,7 @@ func AddStatic(key string , value uint64, replace bool){
 func DumpStatic()  string  {
 	var staticStr string
 	for k,v := range Static {
-		kvStr := fmt.Sprintf("%v-%v",k,v)
+		kvStr := fmt.Sprintf("%v-%v\n",k,v)
 		staticStr+=kvStr
 	}
 	return staticStr
