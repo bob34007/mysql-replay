@@ -208,8 +208,11 @@ func (h *ReplayEventHandler) DoWriteResToFile() {
 				}
 				err= h.OpenNextFile()
 				if err!=nil{
-					h.log.Warn("open file fail , " + err.Error())
-					break
+					h.log.Error("open file fail , " + err.Error()+ " program will exit now")
+					//TODO Unable to open the next file, the current solution is to
+					//exit the program and consider a better solution later
+					os.Exit(-1)
+					//break
 				}
 			}
 		} else {
