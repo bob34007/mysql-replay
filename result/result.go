@@ -28,6 +28,7 @@ type ResForWriteFile struct {
 	RrErrorNo   uint16           `json:"rr-error-no"`
 	RrErrorDesc string           `json:"rr-error-desc"`
 	RrResult    [][]string  `json:"rr-result"`
+	//log and result file
 	Logger      *zap.Logger
 	File        *os.File
 	FilePath    string

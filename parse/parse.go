@@ -25,22 +25,14 @@ package parse
 
 import (
 	"errors"
+	"github.com/bobguo/mysql-replay/util"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/ast"
 	_ "github.com/pingcap/tidb/parser/test_driver"
+	"go.uber.org/zap"
 )
 
-const (
-	SelectStmt uint16 = iota
-	OutfileStmt
-	SetStmt
-	UseStmt
-	UpdateStmt
-	InsertStmt
-	DeleteStmt
-	DDLStmt
-	UnknownStmt
-)
+
 
 type CheckIsSelectOrNot struct {
 	ns []ast.Node
@@ -68,20 +60,20 @@ func Extract(rootNode *ast.StmtNode) uint16 {
 		switch v.ns[0].(type) {
 		case *ast.SelectStmt:
 			if v.ns[0].(*ast.SelectStmt).SelectIntoOpt == nil {
-				return SelectStmt
+				return util.SelectStmt
 			} else {
-				return OutfileStmt
+				return util.OutfileStmt
 			}
 		case *ast.SetStmt:
-			return SetStmt
+			return util.SetStmt
 		case *ast.UseStmt:
-			return UseStmt
+			return util.UseStmt
 		case *ast.UpdateStmt:
-			return UpdateStmt
+			return util.UpdateStmt
 		case *ast.InsertStmt:
-			return InsertStmt
+			return util.InsertStmt
 		case *ast.DeleteStmt:
-			return DeleteStmt
+			return util.DeleteStmt
 		case *ast.AlterTableStmt, *ast.AlterSequenceStmt,
 			*ast.CreateDatabaseStmt, *ast.CreateIndexStmt,
 			*ast.CreateTableStmt, *ast.CreateViewStmt,
@@ -90,14 +82,13 @@ func Extract(rootNode *ast.StmtNode) uint16 {
 			*ast.DropSequenceStmt, *ast.DropPlacementPolicyStmt,
 			*ast.RenameTableStmt, *ast.TruncateTableStmt,
 			*ast.RepairTableStmt:
-			return DDLStmt
+			return util.DDLStmt
 		default:
-			//fmt.Printf("%T\n", v.ns[0])
-			return UnknownStmt
+			return util.UnknownStmt
 		}
 	}
 
-	return UnknownStmt
+	return util.UnknownStmt
 }
 
 func Parse(sql string) (*ast.StmtNode, error) {
@@ -113,4 +104,29 @@ func Parse(sql string) (*ast.StmtNode, error) {
 	}
 
 	return &stmtNodes[0], nil
+}
+
+
+func GetSQLStmtType(sql string) (uint16,error){
+	stmtNode,err := Parse(sql)
+	if err!=nil{
+		return util.UnknownStmt,err
+	}
+	stmtType :=Extract(stmtNode)
+	return stmtType,nil
+}
+
+func CheckNeedReplay(sql string,log *zap.Logger) bool{
+	stmtType ,err := GetSQLStmtType(sql)
+	if err != nil {
+		log.Warn("get sql stmtType fail , "+ err.Error())
+		return false
+	}
+	switch stmtType{
+	case util.UseStmt,util.SetStmt,util.DDLStmt:
+		return true
+	default:
+		return false
+	}
+	return false
 }

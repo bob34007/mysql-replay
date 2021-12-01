@@ -58,7 +58,7 @@ func TestReplayEventHandler_GenerateNextFileName(t *testing.T) {
 	type fields struct {
 		pconn                       stream.ConnID
 		dsn                         string
-		fsm                         *stream.MySQLFSM
+		//fsm                         *stream.MySQLFSM
 		log                         *zap.Logger
 		MySQLConfig                 *mysql.Config
 		schema                      string
@@ -103,7 +103,7 @@ func TestReplayEventHandler_GenerateNextFileName(t *testing.T) {
 			h := &ReplayEventHandler{
 				pconn:                       tt.fields.pconn,
 				dsn:                         tt.fields.dsn,
-				fsm:                         tt.fields.fsm,
+				//fsm:                         tt.fields.fsm,
 				log:                         tt.fields.log,
 				MySQLConfig:                 tt.fields.MySQLConfig,
 				schema:                      tt.fields.schema,

@@ -387,7 +387,7 @@ func Test_GetBeginReplaySQL(t *testing.T){
 }
 
 func Test_GetBeginReplaySQLTime(t *testing.T){
-	ts := time.Now()
+	ts := time.Now().Unix()
 	cfg:=&Config{
 		BeginReplaySQLTime: ts,
 	}
@@ -403,7 +403,7 @@ func Test_SetBeginReplaySQL (t *testing.T){
 }
 
 func TestConfig_CheckNeedReplay(t *testing.T) {
-	ts := time.Now()
+	ts := time.Now().Unix()
 	type fields struct {
 		Dsn                string
 		RunTime            uint32
@@ -417,14 +417,14 @@ func TestConfig_CheckNeedReplay(t *testing.T) {
 		SrcPort            uint16
 		RunType            uint16
 		MySQLConfig        *mysql.Config
-		BeginReplaySQLTime time.Time
+		BeginReplaySQLTime int64
 		BeginReplaySQL     bool
 		BeginTimes         string
 		Mu                 sync.RWMutex
 		Log                *zap.Logger
 	}
 	type args struct {
-		ts time.Time
+		ts int64
 	}
 	tests := []struct {
 		name   string
@@ -438,7 +438,7 @@ func TestConfig_CheckNeedReplay(t *testing.T) {
 				BeginReplaySQL:true,
 			},
 			args:args{
-				ts:time.Now(),
+				ts:time.Now().Unix(),
 			},
 			want:NeedReplaySQL,
 		},
@@ -446,10 +446,10 @@ func TestConfig_CheckNeedReplay(t *testing.T) {
 			name :"NeedReplaySQL",
 			fields:fields{
 				BeginReplaySQL:false,
-				BeginReplaySQLTime:time.Time{},
+				BeginReplaySQLTime:0,
 			},
 			args:args{
-				ts:time.Now(),
+				ts:time.Now().Unix(),
 			},
 			want:NeedReplaySQL,
 		},
@@ -460,7 +460,7 @@ func TestConfig_CheckNeedReplay(t *testing.T) {
 				BeginReplaySQLTime:ts,
 			},
 			args:args{
-				ts:ts.Add(-150 *time.Millisecond),
+				ts: ts-150000,
 			},
 			want:NotWriteLog,
 		},
@@ -471,7 +471,7 @@ func TestConfig_CheckNeedReplay(t *testing.T) {
 				BeginReplaySQLTime:ts,
 			},
 			args:args{
-				ts:ts.Add(-50 *time.Millisecond),
+				ts:ts-50000,
 			},
 			want:NotWriteLog,
 		},
@@ -482,7 +482,7 @@ func TestConfig_CheckNeedReplay(t *testing.T) {
 				BeginReplaySQLTime:ts,
 			},
 			args:args{
-				ts:ts.Add(150 *time.Millisecond),
+				ts:ts+150000,
 			},
 			want:NeedReplaySQL,
 		},

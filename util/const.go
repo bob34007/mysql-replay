@@ -61,3 +61,16 @@ const (
 	NeedWriteLog
 	NeedReplaySQL
 )
+
+
+const (
+	SelectStmt uint16 = iota
+	OutfileStmt
+	SetStmt
+	UseStmt
+	UpdateStmt
+	InsertStmt
+	DeleteStmt
+	DDLStmt
+	UnknownStmt
+)

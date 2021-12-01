@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"math/rand"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/pkg/profile"
@@ -21,14 +23,18 @@ func NewRootCmd() *cobra.Command {
 	var profiler interface{ Stop() }
 	cmd := &cobra.Command{
 		Use: "mysql-replay",
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRun: func(cmd *cobra.Command, args []string)  {
 			rand.Seed(time.Now().UnixNano())
 			cfg := zap.NewDevelopmentConfig()
 			cfg.Level = zap.NewAtomicLevelAt(opts.logLevel.Level)
 			cfg.OutputPaths = opts.logOutput
 			cfg.ErrorOutputPaths = opts.logOutput
 			cfg.DisableStacktrace = !cfg.Level.Enabled(zap.DebugLevel)
-			logger, _ := cfg.Build()
+			logger, err := cfg.Build()
+			if err!=nil{
+				fmt.Println("init log fail , " + err.Error())
+				os.Exit(-1)
+			}
 			zap.ReplaceGlobals(logger)
 			if len(opts.pprof) > 0 {
 				switch opts.pprof {

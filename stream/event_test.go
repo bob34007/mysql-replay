@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/agiledragon/gomonkey"
+	"github.com/bobguo/mysql-replay/util"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/reassembly"
@@ -32,48 +33,48 @@ func TestEventCodec(t *testing.T) {
 	}{
 		{MySQLEvent{
 			Time: 0,
-			Type: EventHandshake,
+			Type: util.EventHandshake,
 		}, "0\t0\t\"\"", true},
 		{MySQLEvent{
 			Time: 1,
-			Type: EventHandshake,
+			Type: util.EventHandshake,
 			DB:   "test",
 		}, "1\t0\t\"test\"", true},
 		{MySQLEvent{
 			Time: 2,
-			Type: EventQuit,
+			Type: util.EventQuit,
 		}, "2\t1", true},
 		{MySQLEvent{
 			Time:  3,
-			Type:  EventQuery,
+			Type:  util.EventQuery,
 			Query: "select * from t where id = 1",
 		}, "3\t2\t\"select * from t where id = 1\"", true},
 		{MySQLEvent{
 			Time:   4,
-			Type:   EventStmtPrepare,
+			Type:   util.EventStmtPrepare,
 			StmtID: 1,
 			Query:  "select * from t where id = ?",
 		}, "4\t3\t1\t\"select * from t where id = ?\"", true},
 		{MySQLEvent{
 			Time:   5,
-			Type:   EventStmtExecute,
+			Type:   util.EventStmtExecute,
 			StmtID: 1,
 			Params: []interface{}{int64(1)},
 		}, "5\t4\t1\t[i\t1", true},
 		{MySQLEvent{
 			Time:   6,
-			Type:   EventStmtExecute,
+			Type:   util.EventStmtExecute,
 			StmtID: 1,
 			Params: []interface{}{},
 		}, "6\t4\t1\t[", true},
 		{MySQLEvent{
 			Time:   7,
-			Type:   EventStmtExecute,
+			Type:   util.EventStmtExecute,
 			StmtID: 1,
 		}, "7\t4\t1\t[", true},
 		{MySQLEvent{
 			Time:   8,
-			Type:   EventStmtClose,
+			Type:   util.EventStmtClose,
 			StmtID: 1,
 		}, "8\t5\t1", true},
 	} {
@@ -156,7 +157,7 @@ func TestStmtParamsCodec(t *testing.T) {
 func BenchmarkScanEventQuery(b *testing.B) {
 	raw, _ := AppendEvent(make([]byte, 0, 4096), MySQLEvent{
 		Time:  time.Now().UnixNano() / int64(time.Millisecond),
-		Type:  EventQuery,
+		Type:  util.EventQuery,
 		Query: "INSERT INTO sbtest1 (id, k, c, pad) VALUES (0, 4855, '26859969401-32022045049-36802759049-57581620716-25566497596-81077101714-43815129390-50670555126-74015418324-70781354462', '78370658245-88835010182-54392836759-10863319425-91771424474')",
 	})
 	s := string(raw)
@@ -169,7 +170,7 @@ func BenchmarkScanEventQuery(b *testing.B) {
 func BenchmarkScanEventQueryJson(b *testing.B) {
 	raw, _ := json.Marshal(MySQLEvent{
 		Time:  time.Now().UnixNano() / int64(time.Millisecond),
-		Type:  EventQuery,
+		Type:  util.EventQuery,
 		Query: "INSERT INTO sbtest1 (id, k, c, pad) VALUES (0, 4855, '26859969401-32022045049-36802759049-57581620716-25566497596-81077101714-43815129390-50670555126-74015418324-70781354462', '78370658245-88835010182-54392836759-10863319425-91771424474')",
 	})
 	var event MySQLEvent
@@ -181,7 +182,7 @@ func BenchmarkScanEventQueryJson(b *testing.B) {
 func BenchmarkScanEventStmtExecute(b *testing.B) {
 	raw, _ := AppendEvent(make([]byte, 0, 4096), MySQLEvent{
 		Time:   time.Now().UnixNano() / int64(time.Millisecond),
-		Type:   EventStmtExecute,
+		Type:   util.EventStmtExecute,
 		StmtID: 1,
 		Params: []interface{}{
 			int64(0),
@@ -203,7 +204,7 @@ func BenchmarkScanEventStmtExecute(b *testing.B) {
 func BenchmarkScanEventStmtExecuteJson(b *testing.B) {
 	raw, _ := json.Marshal(MySQLEvent{
 		Time:   time.Now().UnixNano() / int64(time.Millisecond),
-		Type:   EventStmtExecute,
+		Type:   util.EventStmtExecute,
 		StmtID: 1,
 		Params: []interface{}{
 			int64(0),
@@ -245,7 +246,7 @@ func TestStream_ParsePacket_EventQuery(t *testing.T){
 
 	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
 		func  (_ *MySQLFSM) int{
-			return StateComQuery2
+			return util.StateComQuery2
 		})
 	defer patches3.Reset()
 
@@ -259,7 +260,7 @@ func TestStream_ParsePacket_EventQuery(t *testing.T){
 
 	ast := assert.New(t)
 
-	ast.Equal(e.Type ,EventQuery)
+	ast.Equal(e.Type ,util.EventQuery)
 	ast.Equal(e.Query,query)
 
 }
@@ -292,7 +293,7 @@ func TestStream_ParsePacket_EventStmtExecute(t *testing.T){
 
 	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
 		func  (_ *MySQLFSM) int{
-			return StateComStmtExecute2
+			return util.StateComStmtExecute2
 		})
 	defer patches3.Reset()
 
@@ -312,7 +313,7 @@ func TestStream_ParsePacket_EventStmtExecute(t *testing.T){
 
 	ast := assert.New(t)
 
-	ast.Equal(e.Type ,EventStmtExecute)
+	ast.Equal(e.Type ,util.EventStmtExecute)
 	ast.Equal(e.StmtID,uint64(stmt.ID))
 	ast.Nil(e.Params)
 
@@ -348,7 +349,7 @@ func TestStream_ParsePacket_StateComStmtPrepare1(t *testing.T){
 
 	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
 		func  (_ *MySQLFSM) int{
-			return StateComStmtPrepare1
+			return util.StateComStmtPrepare1
 		})
 	defer patches3.Reset()
 
@@ -362,7 +363,7 @@ func TestStream_ParsePacket_StateComStmtPrepare1(t *testing.T){
 
 	ast := assert.New(t)
 
-	ast.Equal(e.Type ,EventStmtPrepare)
+	ast.Equal(e.Type ,util.EventStmtPrepare)
 	ast.Equal(e.StmtID,uint64(stmt.ID))
 	ast.Equal(e.Query ,query)
 
@@ -398,7 +399,7 @@ func TestStream_ParsePacket_StateComStmtClose(t *testing.T){
 
 	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
 		func  (_ *MySQLFSM) int{
-			return StateComStmtClose
+			return util.StateComStmtClose
 		})
 	defer patches3.Reset()
 
@@ -412,7 +413,7 @@ func TestStream_ParsePacket_StateComStmtClose(t *testing.T){
 
 	ast := assert.New(t)
 
-	ast.Equal(e.Type ,EventStmtClose)
+	ast.Equal(e.Type ,util.EventStmtClose)
 	ast.Equal(e.StmtID,uint64(stmt.ID))
 
 }
@@ -446,7 +447,7 @@ func TestStream_ParsePacket_StateHandshake1(t *testing.T){
 
 	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
 		func  (_ *MySQLFSM) int{
-			return StateHandshake1
+			return util.StateHandshake1
 		})
 	defer patches3.Reset()
 
@@ -460,7 +461,7 @@ func TestStream_ParsePacket_StateHandshake1(t *testing.T){
 
 	ast := assert.New(t)
 
-	ast.Equal(e.Type ,EventHandshake)
+	ast.Equal(e.Type ,util.EventHandshake)
 	ast.Equal(e.DB,db)
 
 }
@@ -493,7 +494,7 @@ func TestStream_ParsePacket_StateComQuit(t *testing.T){
 
 	patches3 := gomonkey.ApplyMethod(reflect.TypeOf(h.fsm), "State",
 		func  (_ *MySQLFSM) int{
-			return StateComQuit
+			return util.StateComQuit
 		})
 	defer patches3.Reset()
 
@@ -502,7 +503,7 @@ func TestStream_ParsePacket_StateComQuit(t *testing.T){
 
 	ast := assert.New(t)
 
-	ast.Equal(e.Type ,EventQuit)
+	ast.Equal(e.Type ,util.EventQuit)
 
 
 }
@@ -660,7 +661,7 @@ func TestMySQLEvent_String(t *testing.T) {
 		{
 			name : "EventQuery",
 			fields: fields{
-				Type:EventQuery,
+				Type:util.EventQuery,
 				Query: query,
 				Time :ts,
 			},
@@ -669,7 +670,7 @@ func TestMySQLEvent_String(t *testing.T) {
 		{
 			name : "EventStmtExecute",
 			fields: fields{
-				Type:EventStmtExecute,
+				Type:util.EventStmtExecute,
 				Time :ts,
 				StmtID: stmtid,
 				Params: params,
@@ -679,7 +680,7 @@ func TestMySQLEvent_String(t *testing.T) {
 		{
 			name : "EventStmtPrepare",
 			fields: fields{
-				Type:EventStmtPrepare,
+				Type:util.EventStmtPrepare,
 				Time :ts,
 				StmtID: stmtid,
 				Query: query,
@@ -689,7 +690,7 @@ func TestMySQLEvent_String(t *testing.T) {
 		{
 			name : "EventStmtClose",
 			fields: fields{
-				Type:EventStmtClose,
+				Type:util.EventStmtClose,
 				Time :ts,
 				StmtID: stmtid,
 				Query: query,
@@ -699,7 +700,7 @@ func TestMySQLEvent_String(t *testing.T) {
 		{
 			name : "EventHandshake",
 			fields: fields{
-				Type:EventHandshake,
+				Type:util.EventHandshake,
 				Time :ts,
 				StmtID: stmtid,
 				Query: query,
@@ -710,7 +711,7 @@ func TestMySQLEvent_String(t *testing.T) {
 		{
 			name : "EventQuit",
 			fields: fields{
-				Type:EventQuit,
+				Type:util.EventQuit,
 				Time :ts,
 				StmtID: stmtid,
 				Query: query,
@@ -739,7 +740,7 @@ func TestMySQLEvent_String(t *testing.T) {
 				Params: tt.fields.Params,
 				DB:     tt.fields.DB,
 				Query:  tt.fields.Query,
-				Fsm:    tt.fields.Fsm,
+				//Fsm:    tt.fields.Fsm,
 				Pr:     tt.fields.Pr,
 				Rr:     tt.fields.Rr,
 			}
@@ -821,22 +822,6 @@ func TestEvent_AsyncParsePacket (t *testing.T){
 	h.fsm.wg.Add(1)
 	close(h.fsm.c)
 	h.AsyncParsePacket()
-}
-
-func TestEvent_OnPacket (t *testing.T){
-	log := zap.L().Named("test")
-	h:=new(eventHandler)
-	h.fsm=NewMySQLFSM(log)
-	patches := gomonkey.ApplyMethod(reflect.TypeOf(h), "AsyncParsePacket",
-		func(_ *eventHandler)  {
-			return
-		})
-	defer patches.Reset()
-
-	var pkt MySQLPacket
-	h.OnPacket(pkt)
-	h.fsm.wg.Done()
-	close(h.fsm.c)
 }
 
 func TestEvent_OnClose (t *testing.T){

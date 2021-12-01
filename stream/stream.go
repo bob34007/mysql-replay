@@ -70,12 +70,14 @@ type FactoryOptions struct {
 	ForceStart    bool
 }
 
+/*
 func NewFactoryFromPacketHandler(factory func(ConnID) MySQLPacketHandler, opts FactoryOptions) *mysqlStreamFactory {
 	if factory == nil {
 		factory = defaultHandlerFactory
 	}
 	return &mysqlStreamFactory{new: factory, opts: opts}
 }
+*/
 
 var _ reassembly.StreamFactory = &mysqlStreamFactory{}
 
@@ -100,9 +102,7 @@ func (f *mysqlStreamFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP
 			}
 		}()
 	}
-	/*if ac != nil && f.ts.Sub(ac.GetCaptureInfo().Timestamp) < 0 {
-		f.ts = ac.GetCaptureInfo().Timestamp
-	}*/
+
 	//stats.Add(stats.Streams, 1)
 	return &mysqlStream{
 		conn: conn,

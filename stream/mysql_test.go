@@ -5,6 +5,8 @@ import (
 	"database/sql/driver"
 	"encoding/binary"
 	"github.com/agiledragon/gomonkey"
+	"github.com/bobguo/mysql-replay/util"
+
 	//"github.com/gobwas/glob/syntax/ast"
 	"testing"
 	"time"
@@ -38,17 +40,17 @@ func TestMysql_InitValue(t *testing.T) {
 
 func TestMysql_Handle_StateComQuit(t *testing.T) {
 	fsm := new(MySQLFSM)
-	fsm.state = StateComQuit
+	fsm.state = util.StateComQuit
 	pkt := new(MySQLPacket)
 	fsm.Handle(*pkt)
 }
 
 func TestMysql_State(t *testing.T) {
 	fsm := new(MySQLFSM)
-	fsm.state = StateComQuit
+	fsm.state = util.StateComQuit
 	i := fsm.State()
 	ast := assert.New(t)
-	ast.Equal(i, StateComQuit)
+	ast.Equal(i, util.StateComQuit)
 }
 
 func TestMysql_Query(t *testing.T) {
@@ -186,42 +188,42 @@ func TestMysql_load(t *testing.T) {
 func TestMysql_setStatusWithNoChange(t *testing.T) {
 	fsm := new(MySQLFSM)
 
-	fsm.state = StateComQuery
+	fsm.state = util.StateComQuery
 	fsm.log = logger
-	to := StateComQuery1
+	to := util.StateComQuery1
 
 	fsm.setStatusWithNoChange(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateComQuery1)
+	ast.Equal(fsm.state, util.StateComQuery1)
 }
 
 func TestMysql_set_changed_false(t *testing.T) {
 	fsm := new(MySQLFSM)
 
-	fsm.state = StateComQuery
+	fsm.state = util.StateComQuery
 	fsm.log = logger
-	to := StateComQuery1
+	to := util.StateComQuery1
 	fsm.changed = false
 
 	fsm.set(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateComQuery1)
+	ast.Equal(fsm.state, util.StateComQuery1)
 }
 
 func TestMysql_set_log_nil(t *testing.T) {
 	fsm := new(MySQLFSM)
 
-	fsm.state = StateComQuery
+	fsm.state = util.StateComQuery
 	fsm.log = nil
-	to := StateComQuery1
+	to := util.StateComQuery1
 	fsm.changed = true
 
 	fsm.set(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateComQuery1)
+	ast.Equal(fsm.state, util.StateComQuery1)
 }
 
 func TestMysql_set_StateComQuery(t *testing.T) {
@@ -229,15 +231,15 @@ func TestMysql_set_StateComQuery(t *testing.T) {
 
 	query := "select * from test"
 	fsm.query = query
-	fsm.state = StateUnknown
+	fsm.state = util.StateUnknown
 	fsm.log = logger
-	to := StateComQuery
+	to := util.StateComQuery
 	fsm.changed = true
 
 	fsm.set(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateComQuery)
+	ast.Equal(fsm.state, util.StateComQuery)
 }
 
 func TestMysql_set_StateComStmtExecute(t *testing.T) {
@@ -245,9 +247,9 @@ func TestMysql_set_StateComStmtExecute(t *testing.T) {
 
 	query := "select * from test where id =?"
 	fsm.query = query
-	fsm.state = StateUnknown
+	fsm.state = util.StateUnknown
 	fsm.log = logger
-	to := StateComStmtExecute
+	to := util.StateComStmtExecute
 	fsm.changed = true
 
 	stmt := new(Stmt)
@@ -261,7 +263,7 @@ func TestMysql_set_StateComStmtExecute(t *testing.T) {
 	fsm.set(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateComStmtExecute)
+	ast.Equal(fsm.state, util.StateComStmtExecute)
 }
 
 func TestMysql_set_StateComStmtPrepare0(t *testing.T) {
@@ -269,9 +271,9 @@ func TestMysql_set_StateComStmtPrepare0(t *testing.T) {
 
 	query := "select * from test where id =?"
 	fsm.query = query
-	fsm.state = StateUnknown
+	fsm.state = util.StateUnknown
 	fsm.log = logger
-	to := StateComStmtPrepare0
+	to := util.StateComStmtPrepare0
 	fsm.changed = true
 
 	stmt := new(Stmt)
@@ -286,7 +288,7 @@ func TestMysql_set_StateComStmtPrepare0(t *testing.T) {
 	fsm.set(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateComStmtPrepare0)
+	ast.Equal(fsm.state, util.StateComStmtPrepare0)
 }
 
 func TestMysql_set_StateComStmtPrepare1(t *testing.T) {
@@ -294,9 +296,9 @@ func TestMysql_set_StateComStmtPrepare1(t *testing.T) {
 
 	query := "select * from test where id =?"
 	fsm.query = query
-	fsm.state = StateUnknown
+	fsm.state = util.StateUnknown
 	fsm.log = logger
-	to := StateComStmtPrepare1
+	to := util.StateComStmtPrepare1
 	fsm.changed = true
 
 	stmt := new(Stmt)
@@ -311,7 +313,7 @@ func TestMysql_set_StateComStmtPrepare1(t *testing.T) {
 	fsm.set(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateComStmtPrepare1)
+	ast.Equal(fsm.state, util.StateComStmtPrepare1)
 }
 
 func TestMysql_set_StateComStmtClose(t *testing.T) {
@@ -319,9 +321,9 @@ func TestMysql_set_StateComStmtClose(t *testing.T) {
 
 	query := "select * from test where id =?"
 	fsm.query = query
-	fsm.state = StateUnknown
+	fsm.state = util.StateUnknown
 	fsm.log = logger
-	to := StateComStmtClose
+	to := util.StateComStmtClose
 	fsm.changed = true
 
 	stmt := new(Stmt)
@@ -336,21 +338,21 @@ func TestMysql_set_StateComStmtClose(t *testing.T) {
 	fsm.set(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateComStmtClose)
+	ast.Equal(fsm.state, util.StateComStmtClose)
 }
 
 func TestMysql_set_StateHandshake1(t *testing.T) {
 	fsm := new(MySQLFSM)
 	schema := "test"
 	fsm.query = schema
-	fsm.state = StateUnknown
+	fsm.state = util.StateUnknown
 	fsm.log = logger
-	to := StateHandshake1
+	to := util.StateHandshake1
 	fsm.changed = true
 	fsm.set(to)
 
 	ast := assert.New(t)
-	ast.Equal(fsm.state, StateHandshake1)
+	ast.Equal(fsm.state, util.StateHandshake1)
 }
 
 func TestMysql_assertDataByte_fail(t *testing.T) {
@@ -418,7 +420,7 @@ func TestMysql_handleComQueryNoLoad(t *testing.T) {
 
 	ast := assert.New(t)
 	ast.Equal(fsm.query, query)
-	ast.Equal(fsm.state, StateComQuery)
+	ast.Equal(fsm.state, util.StateComQuery)
 }
 
 func TestMysql_IsSelectStmtOrSelectPrepare_succ(t *testing.T) {
@@ -990,105 +992,105 @@ func TestStateName(t *testing.T) {
 		{
 			name:"StateInit",
 			args:args{
-				state:StateInit,
+				state:util.StateInit,
 			},
 			want:"Init",
 		},
 		{
 			name:"StateUnknown",
 			args:args{
-				state:StateUnknown,
+				state:util.StateUnknown,
 			},
 			want:"Unknown",
 		},
 		{
 			name:"StateComQuery",
 			args:args{
-				state:StateComQuery,
+				state:util.StateComQuery,
 			},
 			want:"ComQuery",
 		},
 		{
 			name:"StateComQuery1",
 			args:args{
-				state:StateComQuery1,
+				state:util.StateComQuery1,
 			},
 			want:"ReadingComQueryRes",
 		},
 		{
 			name:"StateComQuery2",
 			args:args{
-				state:StateComQuery2,
+				state:util.StateComQuery2,
 			},
 			want:"ReadComQueryResEnd",
 		},
 		{
 			name:"StateComStmtExecute",
 			args:args{
-				state:StateComStmtExecute,
+				state:util.StateComStmtExecute,
 			},
 			want:"ComStmtExecute",
 		},
 		{
 			name:"StateComStmtExecute1",
 			args:args{
-				state:StateComStmtExecute1,
+				state:util.StateComStmtExecute1,
 			},
 			want:"ReadingComStmtExecuteRes",
 		},
 		{
 			name:"StateComStmtExecute2",
 			args:args{
-				state:StateComStmtExecute2,
+				state:util.StateComStmtExecute2,
 			},
 			want:"ReadingComStmtExecuteEnd",
 		},
 		{
 			name:"StateComStmtClose",
 			args:args{
-				state:StateComStmtClose,
+				state:util.StateComStmtClose,
 			},
 			want:"ComStmtClose",
 		},
 		{
 			name:"StateComStmtPrepare0",
 			args:args{
-				state:StateComStmtPrepare0,
+				state:util.StateComStmtPrepare0,
 			},
 			want:"ComStmtPrepare0",
 		},
 		{
 			name:"StateComStmtPrepare1",
 			args:args{
-				state:StateComStmtPrepare1,
+				state:util.StateComStmtPrepare1,
 			},
 			want:"ComStmtPrepare1",
 		},
 		{
 			name:"StateComQuit",
 			args:args{
-				state:StateComQuit,
+				state:util.StateComQuit,
 			},
 			want:"ComQuit",
 		},
 		{
 			name:"StateHandshake0",
 			args:args{
-				state:StateHandshake0,
+				state:util.StateHandshake0,
 			},
 			want:"Handshake0",
 		},
 		{
 			name:"StateHandshake1",
 			args:args{
-				state:StateHandshake1,
+				state:util.StateHandshake1,
 			},
 			want:"Handshake1",
 		},
 		{
 			name:"StateSkipPacket",
 			args:args{
-				state:StateSkipPacket,
+				state:util.StateSkipPacket,
 			},
 			want:"StateSkipPacket",
 		},

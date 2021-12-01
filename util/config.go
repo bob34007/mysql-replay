@@ -229,7 +229,7 @@ func parseDateTime(b []byte, loc *time.Location) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return time.Date(year, month, day, hour, min, sec, nsec, loc).Unix(), nil
+	return time.Date(year, month, day, hour, min, sec, nsec, loc).UnixNano(), nil
 
 }
 
@@ -286,7 +286,7 @@ func (cfg *Config) ParseDateTime() error {
 		err = errors.New("length of time is not 23 digits,YYYY-MM-DD HH:MM:SS.MMMMMM")
 		return err
 	}
-	cfg.BeginReplaySQLTime, err = parseDateTime([]byte(cfg.BeginTimes), time.UTC)
+	cfg.BeginReplaySQLTime, err = parseDateTime([]byte(cfg.BeginTimes), time.Local)
 	return err
 }
 
@@ -336,9 +336,9 @@ func (cfg *Config) CheckNeedReplay(ts int64) uint16 {
 		return NeedReplaySQL
 	}
 
-	if ts - beginTs >= -100000 && ts-beginTs <=0 {
+	if ts - beginTs >= -100000000 && ts-beginTs <=0 {
 		return NeedWriteLog
-	}else if ts - beginTs < -100000 {
+	}else if ts - beginTs < -100000000 {
 		return NotWriteLog
 	} else {
 		cfg.SetBeginReplaySQL(true)

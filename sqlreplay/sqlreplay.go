@@ -73,7 +73,7 @@ func NewReplayEventHandler(conn stream.ConnID,log *zap.Logger, cfg *util.Config)
 type ReplayEventHandler struct {
 	pconn                       stream.ConnID
 	dsn                         string
-	fsm                         *stream.MySQLFSM
+	//fsm                         *stream.MySQLFSM
 	log                         *zap.Logger
 	MySQLConfig                 *mysql.Config
 	schema                      string
@@ -302,11 +302,7 @@ func (h *ReplayEventHandler) ReplayEvent(ch chan stream.MySQLEvent, wg *sync.Wai
 	h.log.Info("thread begin to run for apply mysql event " + h.fileNamePrefix)
 	for {
 		e, ok := <-ch
-
 		if ok {
-			if h.fsm == nil {
-				h.fsm = e.Fsm
-			}
 			h.DoEvent(e)
 		} else {
 			wg.Done()

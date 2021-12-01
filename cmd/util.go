@@ -126,7 +126,9 @@ func getFirstFileName(files map[string]int) string {
 		}
 	}
 
-	files[fileName] = 1
+	if len(fileName) >0 {
+		files[fileName] = 1
+	}
 
 	return fileName
 }

@@ -22,10 +22,9 @@ type MySQLEvent struct {
 	Params []interface{} `json:"params,omitempty"`
 	DB     string        `json:"db,omitempty"`
 	Query  string        `json:"query,omitempty"`
-	Fsm    *MySQLFSM
 	Pr     *PacketRes
 	Rr     *ReplayRes
-	//Logger *zap.Logger
+
 }
 
 func (event *MySQLEvent) Reset(params []interface{}) *MySQLEvent {
@@ -394,7 +393,6 @@ func (h *eventHandler)ParsePacket(pkt MySQLPacket) *MySQLEvent{
 		return nil
 	}
 	e := &MySQLEvent{Time: pkt.Time.UnixNano()}
-	e.Fsm = h.fsm
 	switch h.fsm.State() {
 	case util.StateComQuery2:
 		e.Type = util.EventQuery

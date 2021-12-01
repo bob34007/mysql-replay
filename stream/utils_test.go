@@ -529,10 +529,10 @@ func Test_mapIsolationLevel(t *testing.T) {
 
 func Test_appendDateTime(t *testing.T){
 	var buf []byte
-	ts :=time.Now()
+	ts :=time.Date(2021, 11, 30, 21, 45, 00, 100, time.UTC)
 	d,err:=appendDateTime(buf,ts)
 	ast:=assert.New(t)
-	ast.Equal(len(d),26)
+	ast.Equal(len(d),27)
 	ast.Nil(err)
 }
 

@@ -9,6 +9,9 @@
 package cmd
 
 import (
+	"github.com/google/gopacket"
+	"github.com/stretchr/testify/assert"
+	"os"
 	"testing"
 )
 
@@ -20,8 +23,8 @@ func Test_getFirstFileName(t *testing.T) {
 
 	mfile1 := make(map[string]int)
 	mfile1["test1"]=1
-	mfile1["test2"]=0
 	mfile1["test3"]=0
+	mfile1["test2"]=0
 
 	type args struct {
 		files map[string]int
@@ -55,5 +58,34 @@ func Test_getFirstFileName(t *testing.T) {
 	}
 }
 
+func Test_captureContext (t *testing.T){
+	ci := new(gopacket.CaptureInfo)
+	res := captureContext(*ci)
+	assert.New(t).NotNil(res)
+}
+
+func Test_GetCaptureInfo (t *testing.T){
+	ci := &Context{
+		CaptureInfo: *new(gopacket.CaptureInfo),
+	}
+	res := ci.GetCaptureInfo()
+	assert.New(t).NotNil(res)
+}
 
 
+type ForTest struct{}
+
+func (f ForTest)String() string{
+	return ""
+}
+func (f ForTest)Signal(){
+	return
+}
+func Test_HandleSigs ( t *testing.T){
+	f :=ForTest{}
+	sigs := make(chan os.Signal,1)
+	exits:=make(chan bool ,1 )
+	sigs <- f
+
+	HandleSigs(sigs,exits)
+}
