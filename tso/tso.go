@@ -42,7 +42,7 @@ func (tso *TSO) ParseTS(ts uint64) {
 }
 
 //Get checkpoint TSO from DB
-func (tso *TSO) GetTSOFromDB(ctx context.Context, conn *sql.Conn, log *zap.Logger) (uint64, error) {
+func (tso *TSO) GetTSOFromTiDB(ctx context.Context, conn *sql.Conn, log *zap.Logger) (uint64, error) {
 	query := "select checkPoint  from tidb_binlog.checkpoint; "
 	var strCheckPoint string
 	var err error

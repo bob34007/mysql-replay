@@ -108,7 +108,7 @@ func TestTSO_ParseTS(t *testing.T) {
 
 
 //conn QueryContext fail
-func TestTSO_GetTSOFromDB(t *testing.T) {
+func TestTSO_GetTSOFromTiDB(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
 		panic("new mock db fail," + err.Error())
@@ -138,7 +138,7 @@ func TestTSO_GetTSOFromDB(t *testing.T) {
 		return nil, rs
 	})
 	defer patches.Reset()
-	ullTs, err := tso.GetTSOFromDB(ctx, conn, logger)
+	ullTs, err := tso.GetTSOFromTiDB(ctx, conn, logger)
 
 	ast := assert.New(t)
 	ast.Equal(ullTs, uint64(0))
@@ -147,7 +147,7 @@ func TestTSO_GetTSOFromDB(t *testing.T) {
 }
 
 //row nex fail
-func TestTSO_GetTSOFromDB1(t *testing.T) {
+func TestTSO_GetTSOFromTiDB1(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
 		panic("new mock db fail," + err.Error())
@@ -189,7 +189,7 @@ func TestTSO_GetTSOFromDB1(t *testing.T) {
 		})
 	defer patches3.Reset()
 
-	ullTs, err := tso.GetTSOFromDB(ctx, conn, logger)
+	ullTs, err := tso.GetTSOFromTiDB(ctx, conn, logger)
 
 	ast := assert.New(t)
 	ast.Equal(ullTs, uint64(0))
@@ -199,7 +199,7 @@ func TestTSO_GetTSOFromDB1(t *testing.T) {
 
 
 //all ok
-func TestTSO_GetTSOFromDB2(t *testing.T) {
+func TestTSO_GetTSOFromTiDB2(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
 		panic("new mock db fail," + err.Error())
@@ -257,7 +257,7 @@ func TestTSO_GetTSOFromDB2(t *testing.T) {
 	defer patch.Reset()
 
 
-	ullTs, err := tso.GetTSOFromDB(ctx, conn, logger)
+	ullTs, err := tso.GetTSOFromTiDB(ctx, conn, logger)
 
 	//fmt.Println(ullTs, err)
 	ast:=assert.New(t)
@@ -266,7 +266,7 @@ func TestTSO_GetTSOFromDB2(t *testing.T) {
 
 
 //json Unmarshal fail
-func TestTSO_GetTSOFromDB3(t *testing.T) {
+func TestTSO_GetTSOFromTiDB3(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
 		panic("new mock db fail," + err.Error())
@@ -327,7 +327,7 @@ func TestTSO_GetTSOFromDB3(t *testing.T) {
 	defer patch.Reset()
 
 
-	ullTs, err := tso.GetTSOFromDB(ctx, conn, logger)
+	ullTs, err := tso.GetTSOFromTiDB(ctx, conn, logger)
 
 	//fmt.Println(ullTs, err)
 	ast:=assert.New(t)
@@ -337,7 +337,7 @@ func TestTSO_GetTSOFromDB3(t *testing.T) {
 
 
 //row scan return fail
-func TestTSO_GetTSOFromDB4(t *testing.T) {
+func TestTSO_GetTSOFromTiDB4(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
 		panic("new mock db fail," + err.Error())
@@ -396,7 +396,7 @@ func TestTSO_GetTSOFromDB4(t *testing.T) {
 	defer patch.Reset()
 
 
-	ullTs, err := tso.GetTSOFromDB(ctx, conn, logger)
+	ullTs, err := tso.GetTSOFromTiDB(ctx, conn, logger)
 
 	//fmt.Println(ullTs, err)
 	ast:=assert.New(t)

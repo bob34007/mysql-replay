@@ -69,6 +69,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 			cfg.Log.Info("process begin run at " + time.Now().String())
 			err = cfg.CheckParamValid()
 			if err != nil {
+				cfg.Log.Error("check param fail , " + err.Error())
 				return err
 			}
 
@@ -77,7 +78,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 			err = util.GetDataFile(cfg.DataDir, files, mu)
 			if err != nil {
 				cfg.Log.Error("get file from dataDir fail , " + err.Error())
-				return nil
+				return err
 			}
 
 			go printTime()
@@ -148,7 +149,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 			}
 			cfg.Log.Info(stats.DumpStatic())
 			cfg.Log.Info("process end run at " + time.Now().String())
-			return nil
+			return err
 		},
 	}
 
