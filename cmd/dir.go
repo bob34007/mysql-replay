@@ -26,6 +26,13 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+
 	"github.com/bobguo/mysql-replay/sqlreplay"
 	"github.com/bobguo/mysql-replay/stats"
 	"github.com/bobguo/mysql-replay/stream"
@@ -33,12 +40,6 @@ import (
 	"github.com/google/gopacket/reassembly"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-	"os"
-	"os/signal"
-	"sync"
-	"sync/atomic"
-	"syscall"
-	"time"
 )
 
 func NewDirTextCommand() *cobra.Command {
@@ -104,7 +105,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 			sigs := make(chan os.Signal, 1)
 			exitChan := make(chan bool, 1)
 			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-			go HandleSigs(sigs,exitChan)
+			go HandleSigs(sigs, exitChan)
 
 			handleFileNum := int32(0)
 
@@ -141,9 +142,9 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 			}
 		LOOP:
 			//sleep 200ms and wait for other go routine to exit
-			time.Sleep(time.Millisecond *200 )
+			time.Sleep(time.Millisecond * 200)
 			cfg.Log.Info("read packet end ,begin close all goroutine")
-			if exit == false {
+			if !exit {
 				i := assembler.FlushAll()
 				cfg.Log.Info(fmt.Sprintf("read packet end ,end close all goroutine , %v groutine", i))
 			}
