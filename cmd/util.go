@@ -3,6 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"sync/atomic"
+	"time"
+
 	"github.com/bobguo/mysql-replay/util"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -10,9 +14,6 @@ import (
 	"github.com/google/gopacket/reassembly"
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
-	"os"
-	"sync/atomic"
-	"time"
 )
 
 func captureContext(ci gopacket.CaptureInfo) *Context {
@@ -36,6 +37,7 @@ func handlePcapFile(ctx context.Context, name string, cfg *util.Config, assemble
 	if err != nil {
 		cfg.Log.Error("open pcap file fail " + err.Error())
 		errChan <- err
+		return
 	}
 	defer f.Close()
 	defer atomic.AddInt32(handleFileNum, -1)
@@ -126,7 +128,7 @@ func getFirstFileName(files map[string]int) string {
 		}
 	}
 
-	if len(fileName) >0 {
+	if len(fileName) > 0 {
 		files[fileName] = 1
 	}
 
