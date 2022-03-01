@@ -115,7 +115,7 @@ func NewDirTextDumpReplayCommand() *cobra.Command {
 					mu.Lock()
 					fileName = getFirstFileName(files)
 					if len(fileName) > 0 {
-						go handlePcapFile(ctx, cfg.DataDir+"/"+fileName, cfg,
+						go HandlePcapFileByDir(ctx, cfg.DataDir+"/"+fileName, cfg,
 							assembler, &lastFlushTime, errChan, &handleFileNum)
 						atomic.AddInt32(&handleFileNum, 1)
 					}

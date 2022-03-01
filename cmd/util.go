@@ -28,7 +28,7 @@ func (c *Context) GetCaptureInfo() gopacket.CaptureInfo {
 	return c.CaptureInfo
 }
 
-func handlePcapFile(ctx context.Context, name string, cfg *util.Config, assembler *reassembly.Assembler,
+func HandlePcapFileByDir(ctx context.Context, name string, cfg *util.Config, assembler *reassembly.Assembler,
 	lastFlushTime *time.Time, errChan chan error, handleFileNum *int32) {
 	cfg.Log.Info("process file " + name)
 	var f *pcap.Handle
@@ -69,7 +69,7 @@ func handlePcapFile(ctx context.Context, name string, cfg *util.Config, assemble
 	}
 }
 
-func HandlePcapFile(name string, assembler *reassembly.Assembler, lastFlushTime *time.Time,
+func HandlePcapFileByText(name string, assembler *reassembly.Assembler, lastFlushTime *time.Time,
 	flushInterval time.Duration, log *zap.Logger) error {
 	fmt.Println("process file ", name)
 
@@ -114,6 +114,10 @@ func printTime() {
 
 }
 
+/*
+	We use file name sorting to determine which file is played back first,
+	so we need to make sure the logic is correct when generating pCAP file names
+*/
 func getFirstFileName(files map[string]int) string {
 	fileName := ""
 	for k, v := range files {
